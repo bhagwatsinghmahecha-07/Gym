@@ -340,7 +340,7 @@ function updateChrome() {
   $$('[data-gym]').forEach((e) => (e.textContent = S.settings.gymName));
   const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= 7; }).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
-  $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'edit' && b.dataset.r === 'members')));
+  $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard') || (S.route === 'edit' && b.dataset.r === 'members')));
   $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
   $('.backbtn')?.classList.toggle('hide', S.route === 'dashboard');
   $('#banner').innerHTML = S.user && !S.user.emailVerified ? `<div class="verify">📧 Please verify your email (check your inbox). <button class="linkbtn" data-act="resendverify">Resend email</button></div>` : '';
@@ -348,8 +348,8 @@ function updateChrome() {
 const setTitle = (t) => { $('#title').textContent = t; document.title = t + ' · ' + S.settings.gymName; };
 const view = (html) => ($('#view').innerHTML = html);
 
-const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add: vForm, edit: vForm, reminders: vReminders, batches: vBatches, dues: vDues, reports: vReports, settings: vSettings };
-const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'reports', 'member'];
+const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add: vForm, edit: vForm, reminders: vReminders, batches: vBatches, dues: vDues, duelist: vDueList, reports: vReports, settings: vSettings };
+const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'duelist', 'reports', 'member'];
 // our own page history so the Back button works inside the installed app too
 const navStack = [];
 const resetFilters = () => { S.q = ''; S.fPlan = ''; S.fBatch = ''; S.fStatus = ''; S.fJoin = false; };
@@ -402,11 +402,11 @@ function vDashboard() {
   const soon = list.filter((x) => x.i.left >= 0 && x.i.left <= 7).length;
   const revenue = S.members.flatMap((m) => m.payments).filter((p) => p.date.startsWith(month)).reduce((a, p) => a + p.amount, 0);
   const joins = S.members.filter((m) => m.joinDate.startsWith(month)).length;
-  const dues = list.reduce((a, x) => a + x.i.balance, 0);
+  const dg = dueGroups();
   const planNames = [...new Set([...S.settings.plans.map((p) => p.name), ...active.map((x) => x.i.c.planName)])];
   const cnt = (b) => active.filter((x) => x.m.batch === b).length;
   const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
-  const stat = (icon, tone, label, val, href, attrs = '') => `<${href ? `a href="${href}" ${attrs}` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b></div></${href ? 'a' : 'div'}>`;
+  const stat = (icon, tone, label, val, href, attrs = '', sub = '') => `<${href ? `a href="${href}" ${attrs}` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b>${sub ? `<div class="l">${sub}</div>` : ''}</div></${href ? 'a' : 'div'}>`;
   view(`<section class="hero"><div><div class="hero-sub">${greet}${S.settings.ownerName ? ', ' + esc(S.settings.ownerName.split(' ')[0]) : ''} 👋</div>
       <div class="hero-t">${esc(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
       <a class="hero-n" href="#/reports"><div class="l">This month's revenue ›</div><b>${money(revenue)}</b></a></section>
@@ -417,7 +417,8 @@ function vDashboard() {
       ${stat('x', 'tone-red', 'Expired', list.length - active.length, '#/members', 'data-act="filt" data-st="expired"')}
       ${stat('bell', 'tone-orange', 'Expiring in 7 days', soon, '#/reminders')}
       ${stat('userplus', 'tone-violet', 'New joinings (month)', joins, '#/members', 'data-act="filt" data-join="1"')}
-      ${stat('rupee', 'tone-red', 'Pending dues', money(dues), '#/dues')}</div>
+      ${stat('rupee', 'tone-red', 'Renewal dues', money(dg.rTotal), '#/duelist/renewal', '', `${dg.renewal.length} member${dg.renewal.length === 1 ? '' : 's'} · ending ≤7 days or expired ≤5 days`)}
+      ${stat('wallet', 'tone-orange', 'Unpaid balance', money(dg.uTotal), '#/duelist/unpaid', '', `${dg.unpaid.length} member${dg.unpaid.length === 1 ? '' : 's'} still owe money`)}</div>
     <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<a class="kv" href="#/members" data-act="filt" data-st="live" data-plan="${esc(n)}"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length} ›</b></a>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
       <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
@@ -586,7 +587,7 @@ formHandlers.member = async (f) => {
       if (oldJoin !== m.joinDate) {
         const oldDue = curRenewal(m).due;
         rechain(m);
-        m.logs.push({ at: Date.now(), text: `Joining date ${fmtDate(oldJoin)} → ${fmtDate(m.joinDate)}; due date ${fmtDate(oldDue)} → ${fmtDate(curRenewal(m).due)}` });
+        m.logs.push({ at: Date.now(), text: `Joining date ${fmtDate(oldJoin)} → ${fmtDate(m.joinDate)}; due date ${fmtDate(oldDue)} → ${fmtDate(curRenewal(m).due)}; payment & invoice dates follow the joining date` });
       }
       await saveMember(m);
       toast(oldJoin !== m.joinDate ? 'Updated. New due date: ' + fmtDate(curRenewal(m).due) : 'Member updated'); location.hash = '#/member/' + editId;
@@ -613,10 +614,17 @@ function syncSnaps(m) {
     if (r && p.snap) Object.assign(p.snap, { start: r.start, due: r.due, planName: r.planName, price: r.price });
   });
 }
+// Payments recorded together with a renewal (joining / renewal payment) move with that renewal's date,
+// so payment date, invoice date and monthly revenue land in the right month. Later "Dues payment" entries keep their own date.
+function shiftPayments(m, renewalId, newDate) {
+  let n = 0;
+  m.payments.forEach((p) => { if (p.renewalId === renewalId && p.note !== 'Dues payment' && p.date !== newDate) { p.date = newDate; n++; } });
+  return n;
+}
 function rechain(m) {
   let prevDue = null;
   m.renewals.forEach((r, k) => {
-    if (k === 0) r.date = m.joinDate;
+    if (k === 0 && r.date !== m.joinDate) { r.date = m.joinDate; shiftPayments(m, r.id, r.date); }
     const per = calcPeriod(prevDue, r.date, r.days);
     r.start = per.start; r.due = per.due; prevDue = r.due;
   });
@@ -716,11 +724,13 @@ formHandlers.editrenew = async (f) => {
   if (changedPlan) { r.planId = p.id; r.planName = p.name; r.days = p.days; }
   r.start = d.start; r.due = due; r.date = d.start;
   if (m.renewals.length === 1) m.joinDate = d.start;
+  const moved = old.date !== r.date ? shiftPayments(m, r.id, r.date) : 0;
   const ch = [];
   if (old.start !== r.start) ch.push(`start ${fmtDate(old.start)} → ${fmtDate(r.start)}`);
   if (old.planName !== r.planName) ch.push(`plan ${old.planName} → ${r.planName}`);
   if (old.due !== r.due) ch.push(`due ${fmtDate(old.due)} → ${fmtDate(r.due)}`);
   if (old.price !== r.price) ch.push(`amount ${money(old.price)} → ${money(r.price)}`);
+  if (moved) ch.push(`payment & invoice date → ${fmtDate(r.date)}`);
   if (!ch.length) return closeModal();
   m.logs.push({ at: Date.now(), text: 'Renewal edited: ' + ch.join('; ') });
   syncSnaps(m);
@@ -792,6 +802,40 @@ function vBatches() {
   view(`<div class="seg"><button class="${S.batchTab === 'Morning' ? 'on' : ''}" data-act="tabbatch" data-b="Morning">☀️ Morning (${cnt('Morning')})</button><button class="${S.batchTab === 'Evening' ? 'on' : ''}" data-act="tabbatch" data-b="Evening">🌙 Evening (${cnt('Evening')})</button></div>
     ${rows.map(({ m, i }) => `<div class="rrow">${avatar(m)}<div class="info" data-act="open" data-id="${m.id}" style="cursor:pointer"><b>${esc(m.name)}</b><div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)}</div><div style="margin-top:4px">${daysBadge(i.left)}</div></div>
     <button class="btn sm" data-act="movebatch" data-id="${m.id}">⇄ Move to ${other}</button></div>`).join('') || empty('No members in this batch')}`);
+}
+
+// ------------------------------------------------------------------ DUE GROUPS (dashboard cards + detail list)
+// Renewal dues   = membership ends within the next 7 days, or expired 5 days ago or less. Amount = member's current plan price.
+// Unpaid balance = money still owed on a plan already joined/renewed. Amount = pending balance.
+const RENEW_AHEAD = 7, RENEW_GRACE = 5;
+function dueGroups() {
+  const list = L();
+  const renewal = list.filter((x) => x.i.left <= RENEW_AHEAD && x.i.left >= -RENEW_GRACE).sort((a, b) => a.i.left - b.i.left);
+  const unpaid = list.filter((x) => x.i.balance > 0).sort((a, b) => b.i.balance - a.i.balance);
+  return { renewal, unpaid, rTotal: renewal.reduce((a, x) => a + (+x.i.c.price || 0), 0), uTotal: unpaid.reduce((a, x) => a + x.i.balance, 0) };
+}
+function dueRow(x, kind) {
+  const { m, i } = x, unpaid = kind === 'unpaid';
+  const amt = unpaid ? i.balance : +i.c.price || 0;
+  const wa = unpaid
+    ? waLink(m.phone, `Hello ${m.name}, a balance of ${money(i.balance)} is pending for your ${i.c.planName} membership at ${S.settings.gymName}. Please clear it at your earliest. Thank you!`)
+    : waFor(m, i);
+  return `<div class="rrow">${avatar(m)}<div class="info" data-act="open" data-id="${m.id}" style="cursor:pointer"><div><b>${esc(m.name)}</b></div>
+    <div class="sm mut">${esc(i.c.planName)} · ${m.batch} · due ${fmtDate(i.c.due)}</div>
+    <div style="margin-top:4px">${daysBadge(i.left)}${!unpaid && i.balance ? ` <span class="badge red">Unpaid ${money(i.balance)}</span>` : ''}${unpaid ? ` <span class="badge blue">Plan ${money(i.c.price)}</span>` : ''}</div></div>
+    <div style="text-align:right"><div class="sm mut">${unpaid ? 'Unpaid balance' : 'Plan price'}</div><b style="font-size:18px;color:${unpaid ? 'var(--red)' : 'inherit'}">${money(amt)}</b></div>
+    <div class="acts"><button class="btn primary" data-act="renew" data-id="${m.id}">Renew</button><a class="btn green" href="${wa}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="tel:${m.phone}">📞 Call</a>${i.balance ? `<button class="btn" data-act="collect" data-id="${m.id}">💰 Collect ${money(i.balance)}</button>` : ''}</div></div>`;
+}
+function vDueList(kind) {
+  kind = kind === 'unpaid' ? 'unpaid' : 'renewal';
+  const g = dueGroups(), rows = g[kind], total = kind === 'unpaid' ? g.uTotal : g.rTotal;
+  setTitle(kind === 'unpaid' ? 'Unpaid Balance' : 'Renewal Dues');
+  view(`<div class="seg"><button class="${kind === 'renewal' ? 'on' : ''}" data-act="go" data-to="#/duelist/renewal">Renewal dues (${g.renewal.length})</button><button class="${kind === 'unpaid' ? 'on' : ''}" data-act="go" data-to="#/duelist/unpaid">Unpaid balance (${g.unpaid.length})</button></div>
+    <div class="stats" style="margin-bottom:12px"><div class="stat"><div><div class="l">Total</div><b style="color:var(--red)">${money(total)}</b></div></div><div class="stat"><div><div class="l">Members</div><b>${rows.length}</b></div></div></div>
+    <div class="note">${kind === 'unpaid'
+      ? 'Members who still owe money on a plan they have already joined or renewed. Amount = pending balance.'
+      : `Members whose membership ends in the next ${RENEW_AHEAD} days, plus members expired ${RENEW_GRACE} days ago or less. Amount = the member's current plan price. Members expired for more than ${RENEW_GRACE} days are not counted.`}</div>
+    ${rows.map((x) => dueRow(x, kind)).join('') || empty(kind === 'unpaid' ? '🎉 No unpaid balances' : '🎉 No renewals due right now')}`);
 }
 
 // ------------------------------------------------------------------ DUES
