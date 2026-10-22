@@ -1,10 +1,8 @@
-// STEP: paste YOUR Firebase web-app config here (Firebase console > Project settings > Your apps > Web app).
-// These values are not secrets; your data is protected by login + the rules in firestore.rules.
 export const firebaseConfig = {
-  apiKey: 'PASTE_YOUR_API_KEY',
-  authDomain: 'PASTE_YOUR_PROJECT.firebaseapp.com',
-  projectId: 'PASTE_YOUR_PROJECT_ID',
-  storageBucket: 'PASTE_YOUR_PROJECT.appspot.com',
-  messagingSenderId: 'PASTE_SENDER_ID',
-  appId: 'PASTE_APP_ID',
+  apiKey: "AIzaSyDw6n_eisjGMEmHQkzmbjhYMsqi9tGryEs",
+  authDomain: "gym-manager-5b1a9.firebaseapp.com",
+  projectId: "gym-manager-5b1a9",
+  storageBucket: "gym-manager-5b1a9.firebasestorage.app",
+  messagingSenderId: "543701765039",
+  appId: "1:543701765039:web:d0cd86e26f265c80b73d5a"
 };
