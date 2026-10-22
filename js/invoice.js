@@ -62,15 +62,28 @@ export function printInvoice(d) {
 }
 
 let jsPdfLoading;
-function loadJsPDF() {
-  if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
-  jsPdfLoading ||= new Promise((res, rej) => {
+function loadScript(src) {
+  return new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    s.onload = () => res(window.jspdf.jsPDF);
-    s.onerror = () => rej(new Error('Could not load PDF library (check internet)'));
+    s.src = src;
+    s.onload = res;
+    s.onerror = () => rej(new Error('load failed: ' + src));
     document.head.appendChild(s);
   });
+}
+// PDF library is bundled in /vendor (works offline); CDN is only a backup.
+function loadJsPDF() {
+  if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
+  jsPdfLoading ||= (async () => {
+    for (const src of ['/vendor/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js']) {
+      try {
+        await loadScript(src);
+        if (window.jspdf) return window.jspdf.jsPDF;
+      } catch {}
+    }
+    jsPdfLoading = null;
+    throw new Error('Could not create the PDF. Please use the Print button and choose "Save as PDF".');
+  })();
   return jsPdfLoading;
 }
 

@@ -19,7 +19,7 @@ This makes every gym's data readable only by its own logged-in owner.
 
 ## Step 4 - Upload to GitHub
 1. Create a new repository on github.com (private is fine).
-2. Click **Add file > Upload files** and drag in **everything inside this folder** (index.html, sw.js, manifest.webmanifest, netlify.toml, firebase-config.js, firestore.rules, README.md and the `js`, `css`, `icons` folders). Commit.
+2. Click **Add file > Upload files** and drag in **everything inside this folder** (index.html, sw.js, manifest.webmanifest, netlify.toml, firebase-config.js, firestore.rules, README.md and the `js`, `css`, `icons`, `vendor` folders). Commit.
    Keep the folder structure: `index.html` must be at the top level of the repo.
 
 ## Step 5 - Deploy on Netlify

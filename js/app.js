@@ -102,7 +102,7 @@ function authScreen(mode = 'login', msg = '') {
       <div class="links"><button class="linkbtn" data-act="auth" data-to="login">← Back to login</button></div>`,
   };
   S.shell = false;
-  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="brand">🏋️ Gym Manager</div>${forms[mode]}</div></div>`;
+  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-logo">${ic('dumbbell')}</div><div class="brand">Gym Manager</div>${forms[mode]}</div></div>`;
 }
 
 const errMsg = (e) =>
@@ -293,23 +293,46 @@ async function boot() {
 }
 
 // ------------------------------------------------------------------ shell + router
+const ICONS = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 010 6.8"/><path d="M18 14.3c2.2.6 3.5 2.4 3.5 5.7"/>',
+  bell: '<path d="M6 16V11a6 6 0 1112 0v5l2 2H4z"/><path d="M10 21a2 2 0 004 0"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  wallet: '<path d="M3 7a2 2 0 012-2h13v4"/><path d="M3 7v11a2 2 0 002 2h15V9H5a2 2 0 01-2-2z"/><circle cx="16.5" cy="14.5" r="1.2"/>',
+  chart: '<path d="M4 20V4"/><path d="M4 20h16"/><path d="M8 16v-4"/><path d="M12 16V8"/><path d="M16 16v-6"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>',
+  logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  dumbbell: '<path d="M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  rupee: '<path d="M6 4h12M6 9h12M9 4c5 0 6 5 0 5l7 11"/>',
+  userplus: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M19 8v6M16 11h6"/>',
+  alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.1"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+  x: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+};
+const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const NAV = [
-  ['dashboard', '🏠', 'Dashboard'], ['members', '👥', 'Members'], ['add', '➕', 'Add Member'], ['reminders', '🔔', 'Reminders'],
-  ['batches', '🕒', 'Batches'], ['dues', '💰', 'Payments & Dues'], ['reports', '📊', 'Reports'], ['settings', '⚙️', 'Settings'],
+  ['dashboard', 'home', 'Dashboard'], ['members', 'users', 'Members'], ['reminders', 'bell', 'Reminders'],
+  ['batches', 'clock', 'Batches'], ['dues', 'wallet', 'Payments & Dues'], ['reports', 'chart', 'Reports'], ['settings', 'gear', 'Settings'],
 ];
 function renderShell() {
+  const logo = `<span class="logo">${ic('dumbbell')}</span>`;
   root.innerHTML = `<div class="shell">
-    <aside class="side"><div class="brand">🏋️ <span data-gym></span></div>
-      <nav>${NAV.map(([r, i, l]) => `<button class="navbtn" data-act="go" data-to="#/${r}" data-r="${r}">${i} ${l}<span class="pip hide" data-pip="${r}"></span></button>`).join('')}</nav>
-      <button class="navbtn" data-act="logout">🚪 Logout</button></aside>
-    <div class="main"><header class="top"><h1 id="title"></h1><button class="btn primary sm" data-act="go" data-to="#/add">＋ Add Member</button></header>
+    <aside class="side"><div class="brand">${logo}<span data-gym></span></div>
+      <nav>${NAV.map(([r, i, l]) => `<button class="navbtn ${['dashboard', 'members', 'reminders'].includes(r) ? 'dup' : ''}" data-act="go" data-to="#/${r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
+      <button class="navbtn" data-act="logout">${ic('logout')}<span>Logout</span></button></aside>
+    <div class="main">
+      <header class="topbar"><div class="tb-brand">${logo}<b data-gym></b></div><button class="iconbtn" data-act="logout" aria-label="Logout">${ic('logout')}</button></header>
+      <nav class="toptabs" aria-label="Main">
+        <button class="ttab" data-act="go" data-to="#/dashboard" data-r="dashboard">${ic('home')}<span>Home</span></button>
+        <button class="ttab" data-act="go" data-to="#/members" data-r="members">${ic('users')}<span>Members</span></button>
+        <button class="ttab" data-act="go" data-to="#/reminders" data-r="reminders">${ic('bell')}<span>Reminders</span><i class="pip hide" data-pip="reminders"></i></button>
+        <button class="ttab more" data-act="more">${ic('menu')}<span>More</span></button></nav>
+      <div class="pagehead"><h1 id="title"></h1></div>
       <div id="banner"></div><main id="view"></main></div>
-    <nav class="tabbar">
-      <button class="tab" data-act="go" data-to="#/dashboard" data-r="dashboard"><span>🏠</span>Home</button>
-      <button class="tab" data-act="go" data-to="#/members" data-r="members"><span>👥</span>Members</button>
-      <button class="tab plus" data-act="go" data-to="#/add" data-r="add"><span>＋</span></button>
-      <button class="tab" data-act="go" data-to="#/reminders" data-r="reminders"><span>🔔</span>Reminders<i class="pip hide" data-pip="reminders"></i></button>
-      <button class="tab" data-act="more"><span>☰</span>More</button></nav></div>`;
+    <button class="fab" data-act="go" data-to="#/add" aria-label="Add member" title="Add member">${ic('plus')}</button></div>`;
   S.shell = true;
 }
 function updateChrome() {
@@ -317,6 +340,7 @@ function updateChrome() {
   const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= 7; }).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
   $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'edit' && b.dataset.r === 'members')));
+  $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
   $('#banner').innerHTML = S.user && !S.user.emailVerified ? `<div class="verify">📧 Please verify your email (check your inbox). <button class="linkbtn" data-act="resendverify">Resend email</button></div>` : '';
 }
 const setTitle = (t) => { $('#title').textContent = t; document.title = t + ' · ' + S.settings.gymName; };
@@ -371,29 +395,31 @@ function vDashboard() {
   const dues = list.reduce((a, x) => a + x.i.balance, 0);
   const planNames = [...new Set([...S.settings.plans.map((p) => p.name), ...active.map((x) => x.i.c.planName)])];
   const cnt = (b) => active.filter((x) => x.m.batch === b).length;
-  view(`<div class="quick">
-      <button class="btn primary" data-act="go" data-to="#/add"><span>➕</span>Add Member</button>
-      <button class="btn" data-act="go" data-to="#/reminders"><span>🔔</span>Reminders</button>
-      <button class="btn" data-act="go" data-to="#/dues"><span>💰</span>Collect Payment</button></div>
+  const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  const stat = (icon, tone, label, val, href) => `<${href ? `a href="${href}"` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b></div></${href ? 'a' : 'div'}>`;
+  view(`<section class="hero"><div><div class="hero-sub">${greet}${S.settings.ownerName ? ', ' + esc(S.settings.ownerName.split(' ')[0]) : ''} 👋</div>
+      <div class="hero-t">${esc(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
+      <div class="hero-n"><div class="l">This month's revenue</div><b>${money(revenue)}</b></div></section>
+    <div class="quick"><a class="btn" href="#/reminders">${ic('bell')} Reminders</a><a class="btn" href="#/dues">${ic('wallet')} Collect Payment</a></div>
     <div class="stats">
-      <div class="stat"><div class="l">Total members</div><b>${list.length}</b></div>
-      <div class="stat"><div class="l">Active</div><b style="color:var(--green)">${active.length}</b></div>
-      <div class="stat"><div class="l">Expired</div><b style="color:var(--red)">${list.length - active.length}</b></div>
-      <a class="stat" href="#/reminders"><div class="l">Expiring in 7 days ›</div><b style="color:var(--orange)">${soon}</b></a>
-      <div class="stat"><div class="l">This month's revenue</div><b>${money(revenue)}</b></div>
-      <div class="stat"><div class="l">New joinings (month)</div><b>${joins}</b></div>
-      <a class="stat" href="#/dues"><div class="l">Pending dues ›</div><b style="color:var(--red)">${money(dues)}</b></a></div>
+      ${stat('users', 'tone-blue', 'Total members', list.length)}
+      ${stat('check', 'tone-green', 'Active', active.length)}
+      ${stat('x', 'tone-red', 'Expired', list.length - active.length)}
+      ${stat('bell', 'tone-orange', 'Expiring in 7 days', soon, '#/reminders')}
+      ${stat('userplus', 'tone-violet', 'New joinings (month)', joins)}
+      ${stat('rupee', 'tone-red', 'Pending dues', money(dues), '#/dues')}</div>
     <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<div class="kv"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length}</b></div>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
-      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning</span><b>${cnt('Morning')}</b></a>
-      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Evening"><span>🌙 Evening</span><b>${cnt('Evening')}</b></a></div></div></div>`);
+      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
+      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Evening"><span>🌙 Evening batch</span><b>${cnt('Evening')}</b></a></div></div></div>`);
 }
 
 // ------------------------------------------------------------------ MEMBERS list
 function vMembers() {
   setTitle('Members');
   const opt = (arr, v) => arr.map(([val, l]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${l}</option>`).join('');
-  view(`<div class="toolbar"><input id="q" type="search" placeholder="🔍 Search name or phone" value="${esc(S.q)}">
+  view(`<div class="bar"><div class="mut">Search, filter and manage your members</div><button class="btn primary" data-act="go" data-to="#/add">${ic('plus')} Add Member</button></div>
+    <div class="toolbar"><input id="q" type="search" placeholder="Search name or phone" value="${esc(S.q)}">
     <select id="fPlan"><option value="">All plans</option>${opt(S.settings.plans.map((p) => [p.name, p.name]), S.fPlan)}</select>
     <select id="fBatch"><option value="">All batches</option>${opt([['Morning', 'Morning'], ['Evening', 'Evening']], S.fBatch)}</select>
     <select id="fStatus"><option value="">All status</option>${opt([['active', 'Active'], ['soon', 'Expiring Soon'], ['expired', 'Expired']], S.fStatus)}</select></div>
@@ -477,7 +503,7 @@ function vForm(id) {
     <div class="grid2"><label>Emergency contact<input name="emergency" value="${v('emergency')}" placeholder="Name & number"></label>
       <label>Joining date<input name="joinDate" type="date" required value="${m?.joinDate || todayStr()}"></label></div>
     <label>Address<textarea name="address" style="min-height:64px">${v('address')}</textarea></label>
-    ${m ? `<div class="note">To change plan or dates use <b>Renew</b> or <b>Edit renewal date / plan</b> on the member's profile.</div>` : `
+    ${m ? `<div class="note">Changing the <b>joining date</b> here recalculates the due date automatically (joining date + plan days). To change the plan use <b>Edit renewal date / plan</b> on the profile.</div>` : `
     <h2>Plan & payment</h2>
     <div class="grid2"><label>Plan<select name="plan">${planOptions(firstPlan?.id)}</select></label>
       <label>Discount (₹)<input name="discount" type="number" min="0" step="any" value="0"></label></div>
@@ -544,9 +570,15 @@ formHandlers.member = async (f) => {
   try {
     const base = { name: d.name.trim(), phone, age: d.age, gender: d.gender, batch: d.batch, emergency: d.emergency, address: d.address, joinDate: d.joinDate, notes: d.notes, photo: S.photo || '' };
     if (editId) {
-      const m = getMember(editId);
-      await saveMember({ ...m, ...base });
-      toast('Member updated'); location.hash = '#/member/' + editId;
+      const m = structuredClone(getMember(editId)), oldJoin = m.joinDate;
+      Object.assign(m, base);
+      if (oldJoin !== m.joinDate) {
+        const oldDue = curRenewal(m).due;
+        rechain(m);
+        m.logs.push({ at: Date.now(), text: `Joining date ${fmtDate(oldJoin)} → ${fmtDate(m.joinDate)}; due date ${fmtDate(oldDue)} → ${fmtDate(curRenewal(m).due)}` });
+      }
+      await saveMember(m);
+      toast(oldJoin !== m.joinDate ? 'Updated. New due date: ' + fmtDate(curRenewal(m).due) : 'Member updated'); location.hash = '#/member/' + editId;
     } else {
       const p = planOf(d.plan);
       if (!p) throw { message: 'Please add a plan in Settings first.' };
@@ -562,6 +594,23 @@ formHandlers.member = async (f) => {
   } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
 };
+
+// Recalculate every renewal's start/due from the joining date + plan days (first renewal starts on the joining date)
+function syncSnaps(m) {
+  m.payments.forEach((p) => {
+    const r = m.renewals.find((x) => x.id === p.renewalId);
+    if (r && p.snap) Object.assign(p.snap, { start: r.start, due: r.due, planName: r.planName, price: r.price });
+  });
+}
+function rechain(m) {
+  let prevDue = null;
+  m.renewals.forEach((r, k) => {
+    if (k === 0) r.date = m.joinDate;
+    const per = calcPeriod(prevDue, r.date, r.days);
+    r.start = per.start; r.due = per.due; prevDue = r.due;
+  });
+  syncSnaps(m);
+}
 
 // ------------------------------------------------------------------ payments helper
 async function nextInvoiceNo() {
@@ -654,7 +703,8 @@ formHandlers.editrenew = async (f) => {
   if (due < d.start || days < 1) return showErr(f, 'Due date cannot be earlier than the start date.');
   if (changedPlan && p.price !== r.price && confirm(`The new plan costs ${money(p.price)} but this renewal was billed ${money(r.price)}.\n\nOK = change the amount to ${money(p.price)} and update the pending balance.\nCancel = keep the old amount.`)) r.price = p.price;
   if (changedPlan) { r.planId = p.id; r.planName = p.name; r.days = p.days; }
-  r.start = d.start; r.due = due;
+  r.start = d.start; r.due = due; r.date = d.start;
+  if (m.renewals.length === 1) m.joinDate = d.start;
   const ch = [];
   if (old.start !== r.start) ch.push(`start ${fmtDate(old.start)} → ${fmtDate(r.start)}`);
   if (old.planName !== r.planName) ch.push(`plan ${old.planName} → ${r.planName}`);
@@ -662,6 +712,7 @@ formHandlers.editrenew = async (f) => {
   if (old.price !== r.price) ch.push(`amount ${money(old.price)} → ${money(r.price)}`);
   if (!ch.length) return closeModal();
   m.logs.push({ at: Date.now(), text: 'Renewal edited: ' + ch.join('; ') });
+  syncSnaps(m);
   busy(f, true);
   try { await saveMember(m); closeModal(); toast('Renewal updated. Due date: ' + fmtDate(r.due)); } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
@@ -758,7 +809,7 @@ function vReports() {
   view(`<label style="max-width:240px">Month<input type="month" id="rmonth" value="${mo}"></label>
     <div class="stats"><div class="stat"><div class="l">Revenue</div><b>${money(rev(mo))}</b></div><div class="stat"><div class="l">New joinings</div><b>${joins}</b></div><div class="stat"><div class="l">Renewals</div><b>${renewals}</b></div>
     <div class="stat"><div class="l">Expired (due in month)</div><b>${expiredIn}</b></div><div class="stat"><div class="l">Pending dues (now)</div><b style="color:var(--red)">${money(dues)}</b></div></div>
-    <h2>Revenue - last 6 months</h2><div class="card"><div class="bars">${months.map((k, n) => `<div class="bar"><span>${vals[n] ? money(vals[n]) : ''}</span><i style="height:${Math.round((vals[n] / mx) * 100)}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>
+    <h2>Revenue - last 6 months</h2><div class="card"><div class="bars">${months.map((k, n) => `<div class="bar-c"><span>${vals[n] ? money(vals[n]) : ''}</span><i style="height:${Math.round((vals[n] / mx) * 100)}%"></i><span>${k.slice(5)}/${k.slice(2, 4)}</span></div>`).join('')}</div></div>
     <h2>Export (opens in Excel)</h2><div class="actions"><button class="btn" data-act="dlmembers">⬇️ Members CSV</button><button class="btn" data-act="dlpayments">⬇️ Payments CSV</button><button class="btn" data-act="dlrenewals">⬇️ Renewal history CSV</button></div>`);
 }
 const stamp = () => todayStr();
@@ -902,7 +953,7 @@ const actions = {
   resendverify() { sendEmailVerification(S.user).then(() => toast('Verification email sent')).catch((e) => toast(errMsg(e), 'err')); },
   closemodal: closeModal,
   ovclick(a, el, e) { if (e.target === el) closeModal(); },
-  more() { openModal('More', `<div class="actions" style="flex-direction:column">${NAV.filter((n) => ['batches', 'dues', 'reports', 'settings'].includes(n[0])).map(([r, i, l]) => `<button class="btn" data-act="go" data-to="#/${r}">${i} ${l}</button>`).join('')}<button class="btn danger" data-act="logout">🚪 Logout</button></div>`); },
+  more() { openModal('More', `<div class="actions" style="flex-direction:column">${NAV.filter((n) => ['batches', 'dues', 'reports', 'settings'].includes(n[0])).map(([r, i, l]) => `<button class="btn" data-act="go" data-to="#/${r}">${ic(i)} ${l}</button>`).join('')}<button class="btn danger" data-act="logout">${ic('logout')} Logout</button></div>`); },
   sort(a) { S.sort = { k: a.k, d: S.sort.k === a.k ? -S.sort.d : 1 }; drawMembers(); },
   open: (a) => (location.hash = '#/member/' + a.id),
   renew: (a) => openRenew(a.id),
