@@ -44,7 +44,7 @@ const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', p
 
 const S = {
   user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
-  route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', batchTab: 'Morning',
+  route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', fJoin: false, batchTab: 'Morning',
   rmonth: todayStr().slice(0, 7), photo: '',
 };
 let unsubs = [];
@@ -80,7 +80,7 @@ function authScreen(mode = 'login', msg = '') {
         <button class="btn primary block" type="submit">Login</button>
       </form>
       <div class="links"><button class="linkbtn" data-act="auth" data-to="forgot">Forgot Password?</button><button class="linkbtn" data-act="auth" data-to="link">Login with OTP link</button></div>
-      <div class="links"><span class="mut">New gym?</span><button class="linkbtn" data-act="auth" data-to="signup">Create account</button></div>`,
+`,
     signup: `<p>Create your owner account</p>
       <form data-form="signup">
         <div class="grid2"><label>Your name<input name="oname" required autocomplete="name"></label><label>Gym name<input name="gym" required></label></div>
@@ -259,7 +259,7 @@ onAuthStateChanged(auth, (user) => {
   unsubs.forEach((u) => u()); unsubs = []; bootDone = false;
   S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
   S.user = user;
-  if (!user) { $('#lock').innerHTML = ''; return authScreen('login'); }
+  if (!user) { $('#lock').innerHTML = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login'); }
   if (inactiveTooLong()) { signOut(auth); return; }
   touchActivity();
   root.innerHTML = '<div class="splash">🏋️ Loading your gym…</div>';
@@ -303,6 +303,7 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>',
   logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
   dumbbell: '<path d="M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   rupee: '<path d="M6 4h12M6 9h12M9 4c5 0 6 5 0 5l7 11"/>',
@@ -330,7 +331,7 @@ function renderShell() {
         <button class="ttab" data-act="go" data-to="#/members" data-r="members">${ic('users')}<span>Members</span></button>
         <button class="ttab" data-act="go" data-to="#/reminders" data-r="reminders">${ic('bell')}<span>Reminders</span><i class="pip hide" data-pip="reminders"></i></button>
         <button class="ttab more" data-act="more">${ic('menu')}<span>More</span></button></nav>
-      <div class="pagehead"><h1 id="title"></h1></div>
+      <div class="pagehead"><button class="backbtn hide" data-act="back" aria-label="Go back">${ic('back')}<span>Back</span></button><h1 id="title"></h1></div>
       <div id="banner"></div><main id="view"></main></div>
     <button class="fab" data-act="go" data-to="#/add" aria-label="Add member" title="Add member">${ic('plus')}</button></div>`;
   S.shell = true;
@@ -341,6 +342,7 @@ function updateChrome() {
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
   $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'edit' && b.dataset.r === 'members')));
   $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
+  $('.backbtn')?.classList.toggle('hide', S.route === 'dashboard');
   $('#banner').innerHTML = S.user && !S.user.emailVerified ? `<div class="verify">📧 Please verify your email (check your inbox). <button class="linkbtn" data-act="resendverify">Resend email</button></div>` : '';
 }
 const setTitle = (t) => { $('#title').textContent = t; document.title = t + ' · ' + S.settings.gymName; };
@@ -348,11 +350,19 @@ const view = (html) => ($('#view').innerHTML = html);
 
 const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add: vForm, edit: vForm, reminders: vReminders, batches: vBatches, dues: vDues, reports: vReports, settings: vSettings };
 const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'reports', 'member'];
+// our own page history so the Back button works inside the installed app too
+const navStack = [];
+const resetFilters = () => { S.q = ''; S.fPlan = ''; S.fBatch = ''; S.fStatus = ''; S.fJoin = false; };
 function route(keepScroll) {
   if (!S.user || !S.ready.s || !S.ready.m) return;
   if (!S.shell) renderShell();
   const [name, arg] = (location.hash.slice(2) || 'dashboard').split('/');
   S.route = routes[name] ? name : 'dashboard'; S.arg = arg;
+  if (!keepScroll && S.route !== 'add' && S.route !== 'edit') {
+    const h = location.hash || '#/dashboard', k = navStack.lastIndexOf(h);
+    if (k >= 0) navStack.length = k + 1; else navStack.push(h);
+    if (navStack.length > 40) navStack.shift();
+  }
   if (S.route === 'add' || S.route === 'edit') S.photo = S.route === 'edit' ? getMember(arg)?.photo || '' : '';
   routes[S.route](arg);
   updateChrome();
@@ -396,19 +406,19 @@ function vDashboard() {
   const planNames = [...new Set([...S.settings.plans.map((p) => p.name), ...active.map((x) => x.i.c.planName)])];
   const cnt = (b) => active.filter((x) => x.m.batch === b).length;
   const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
-  const stat = (icon, tone, label, val, href) => `<${href ? `a href="${href}"` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b></div></${href ? 'a' : 'div'}>`;
+  const stat = (icon, tone, label, val, href, attrs = '') => `<${href ? `a href="${href}" ${attrs}` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b></div></${href ? 'a' : 'div'}>`;
   view(`<section class="hero"><div><div class="hero-sub">${greet}${S.settings.ownerName ? ', ' + esc(S.settings.ownerName.split(' ')[0]) : ''} 👋</div>
       <div class="hero-t">${esc(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
-      <div class="hero-n"><div class="l">This month's revenue</div><b>${money(revenue)}</b></div></section>
+      <a class="hero-n" href="#/reports"><div class="l">This month's revenue ›</div><b>${money(revenue)}</b></a></section>
     <div class="quick"><a class="btn" href="#/reminders">${ic('bell')} Reminders</a><a class="btn" href="#/dues">${ic('wallet')} Collect Payment</a></div>
     <div class="stats">
-      ${stat('users', 'tone-blue', 'Total members', list.length)}
-      ${stat('check', 'tone-green', 'Active', active.length)}
-      ${stat('x', 'tone-red', 'Expired', list.length - active.length)}
+      ${stat('users', 'tone-blue', 'Total members', list.length, '#/members', 'data-act="filt"')}
+      ${stat('check', 'tone-green', 'Active', active.length, '#/members', 'data-act="filt" data-st="live"')}
+      ${stat('x', 'tone-red', 'Expired', list.length - active.length, '#/members', 'data-act="filt" data-st="expired"')}
       ${stat('bell', 'tone-orange', 'Expiring in 7 days', soon, '#/reminders')}
-      ${stat('userplus', 'tone-violet', 'New joinings (month)', joins)}
+      ${stat('userplus', 'tone-violet', 'New joinings (month)', joins, '#/members', 'data-act="filt" data-join="1"')}
       ${stat('rupee', 'tone-red', 'Pending dues', money(dues), '#/dues')}</div>
-    <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<div class="kv"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length}</b></div>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
+    <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<a class="kv" href="#/members" data-act="filt" data-st="live" data-plan="${esc(n)}"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length} ›</b></a>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
       <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
       <a class="kv" href="#/batches" data-act="tabbatch" data-b="Evening"><span>🌙 Evening batch</span><b>${cnt('Evening')}</b></a></div></div></div>`);
@@ -422,7 +432,7 @@ function vMembers() {
     <div class="toolbar"><input id="q" type="search" placeholder="Search name or phone" value="${esc(S.q)}">
     <select id="fPlan"><option value="">All plans</option>${opt(S.settings.plans.map((p) => [p.name, p.name]), S.fPlan)}</select>
     <select id="fBatch"><option value="">All batches</option>${opt([['Morning', 'Morning'], ['Evening', 'Evening']], S.fBatch)}</select>
-    <select id="fStatus"><option value="">All status</option>${opt([['active', 'Active'], ['soon', 'Expiring Soon'], ['expired', 'Expired']], S.fStatus)}</select></div>
+    <select id="fStatus"><option value="">All status</option>${opt([['live', 'Active + Expiring soon'], ['active', 'Active only'], ['soon', 'Expiring Soon'], ['expired', 'Expired']], S.fStatus)}</select></div>
     <div id="mlist"></div>`);
   drawMembers();
 }
@@ -435,12 +445,13 @@ function drawMembers() {
   const q = S.q.trim().toLowerCase();
   let list = L().filter((x) =>
     (!q || x.m.name.toLowerCase().includes(q) || x.m.phone.includes(q.replace(/\D/g, '') || '§')) &&
-    (!S.fPlan || x.i.c.planName === S.fPlan) && (!S.fBatch || x.m.batch === S.fBatch) && (!S.fStatus || x.i.status === S.fStatus));
+    (!S.fPlan || x.i.c.planName === S.fPlan) && (!S.fBatch || x.m.batch === S.fBatch) && (!S.fStatus || (S.fStatus === 'live' ? x.i.status !== 'expired' : x.i.status === S.fStatus)) && (!S.fJoin || x.m.joinDate.startsWith(todayStr().slice(0, 7))));
+  const chips = (q || S.fPlan || S.fBatch || S.fStatus || S.fJoin) ? `<div class="chips">${S.fJoin ? '<span class="badge blue">Joined this month</span>' : ''}<button class="btn sm" data-act="clearfilters">✕ Clear filters</button></div>` : '';
   const f = SORT_KEYS[S.sort.k];
   list.sort((a, b) => (f(a) > f(b) ? 1 : f(a) < f(b) ? -1 : 0) * S.sort.d);
-  if (!list.length) return (box.innerHTML = empty(S.members.length ? 'No members match your search/filters.' : 'No members yet. Tap <b>＋ Add Member</b> to add your first one.'));
+  if (!list.length) return (box.innerHTML = chips + empty(S.members.length ? 'No members match your search/filters.' : 'No members yet. Tap <b>＋ Add Member</b> to add your first one.'));
   const th = (k, l) => `<th data-act="sort" data-k="${k}">${l}${S.sort.k === k ? (S.sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-  box.innerHTML = `<div class="mut sm" style="margin-bottom:8px">${list.length} member${list.length > 1 ? 's' : ''}</div>
+  box.innerHTML = `${chips}<div class="mut sm" style="margin-bottom:8px">${list.length} member${list.length > 1 ? 's' : ''}</div>
   <div class="cards-only">${list.map(({ m, i }) => `<div class="mcard" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
     <div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">Due ${fmtDate(i.c.due)}</div>
     <div class="row2">${daysBadge(i.left)}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>`).join('')}</div>
@@ -946,7 +957,15 @@ Object.assign(formHandlers, {
 
 // ------------------------------------------------------------------ actions (click delegation)
 const actions = {
-  go: (a) => (location.hash = a.to),
+  go(a) { if (a.to === '#/members') resetFilters(); location.hash = a.to; },
+  filt(a) { resetFilters(); S.fStatus = a.st || ''; S.fPlan = a.plan || ''; S.fJoin = !!a.join; },
+  clearfilters() { resetFilters(); vMembers(); },
+  back() {
+    const cur = location.hash || '#/dashboard';
+    if (navStack[navStack.length - 1] === cur) navStack.pop();
+    const prev = navStack[navStack.length - 1];
+    location.hash = prev && prev !== cur ? prev : '#/dashboard';
+  },
   auth: (a) => authScreen(a.to),
   eye(a, el) { const i = el.parentElement.querySelector('input'); i.type = i.type === 'password' ? 'text' : 'password'; },
   logout() { sessionStorage.removeItem('gm_unlocked'); signOut(auth); },
