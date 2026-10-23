@@ -216,3 +216,6 @@ tbody tr.clickable:hover,a.kv:hover{background:#fbecef}
 .rem-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;background:linear-gradient(135deg,#9b1d3a,#6d0a24);color:#fff;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-weight:600}
 .rem-bar span{display:flex;align-items:center;gap:8px}.rem-bar .ic{width:18px;height:18px}
 .rem-bar button{border:0;border-radius:10px;background:#fff;color:#6d0a24;font:inherit;font-weight:700;padding:8px 14px;cursor:pointer}
+
+.seg.three button{font-size:13px;padding:0 4px}
+@media (max-width:420px){.seg.three button{font-size:12.5px}.seg.three .cnt{padding:0 5px;margin-left:2px}}

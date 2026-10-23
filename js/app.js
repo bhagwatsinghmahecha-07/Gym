@@ -42,7 +42,9 @@ const DEFAULT_TEMPLATE =
   'Hello {name}, your {plan} gym membership expires on {date}. Please renew your subscription to continue your workouts. Thank you! - {gym}';
 const DEFAULT_EXPIRED_TEMPLATE =
   'Hello {name}, your {plan} gym membership expired on {date}. We miss you at the gym! Renew now to get back to your workouts. - {gym}';
-const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, logo: '', invSeq: 0 };
+const DEFAULT_WELCOME_TEMPLATE =
+  'Welcome to {gym}, {name}! Your {plan} membership is active from {start} to {date}. We are glad to have you with us. See you at the gym! - {gym}';
+const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', invSeq: 0 };
 
 const S = {
   user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
@@ -358,7 +360,7 @@ function renderShell() {
 }
 function updateChrome() {
   $$('[data-gym]').forEach((e) => (e.textContent = S.settings.gymName));
-  const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= SOON_DAYS; }).length;
+  const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= SOON_DAYS; }).length + S.members.filter(isWelcome).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
   $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard') || (S.route === 'edit' && b.dataset.r === 'members')));
   $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
@@ -411,9 +413,30 @@ const initials = (n) => (n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[
 const avatar = (m, lg) => (m.photo ? `<img class="av ${lg ? 'lg' : ''}" src="${m.photo}" alt="">` : `<div class="av ${lg ? 'lg' : ''}">${esc(initials(m.name))}</div>`);
 const L = () => S.members.map((m) => ({ m, i: memberInfo(m) }));
 const planOptions = (sel) => S.settings.plans.map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)} - ${money(p.price)} (${p.days} days)</option>`).join('');
-// expired members get the "expired" message, everyone else the normal reminder
-const msgFor = (m, i) => fmtMsg(i.left < 0 ? S.settings.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE : S.settings.template, { name: m.name, plan: i.c.planName, date: fmtDate(i.c.due), gym: S.settings.gymName });
+// WhatsApp message depends on the member's stage:
+//   first day after joining (welcome not sent yet) -> welcome | more than 5 days left -> no message
+//   5 days or less left -> renewal reminder | expired up to 2 days -> expired message | expired longer -> no message
+const isWelcome = (m) => { const d = diffDays(todayStr(), m.joinDate); return !m.welcomeSent && d >= 0 && d <= 1; };
+const stageOf = (m, i) => (isWelcome(m) ? 'welcome' : i.left < 0 ? (i.left >= -RENEW_GRACE ? 'expired' : 'none') : i.left <= SOON_DAYS ? 'soon' : 'none');
+const msgFor = (m, i) => {
+  const tpl = { welcome: S.settings.welcomeTemplate || DEFAULT_WELCOME_TEMPLATE, expired: S.settings.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE, soon: S.settings.template }[stageOf(m, i)];
+  return tpl ? fmtMsg(tpl, { name: m.name, plan: i.c.planName, start: fmtDate(i.c.start), date: fmtDate(i.c.due), gym: S.settings.gymName }) : '';
+};
 const waFor = (m, i) => waLink(m.phone, msgFor(m, i));
+// WhatsApp button: becomes "Send welcome" (and marks the welcome as sent) during the first day
+const waBtn = (m, i, cls = 'mp-btn wa') => { const w = isWelcome(m); return `<a class="${cls}" href="${waFor(m, i)}" target="_blank" rel="noopener"${w ? ` data-act="welcomesent" data-id="${m.id}"` : ''}>${ic('whatsapp')}${w ? 'Send welcome' : 'WhatsApp'}</a>`; };
+async function markWelcome(id, text) {
+  const m = structuredClone(getMember(id)); if (!m || m.welcomeSent) return;
+  m.welcomeSent = true; m.logs.push({ at: Date.now(), text });
+  try { await saveMember(m); } catch (e) { toast(errMsg(e), 'err'); }
+}
+function offerWelcome(m) {
+  if (!isWelcome(m)) return;
+  const i = memberInfo(m);
+  openModal('Member added', `<div class="head" style="margin-bottom:12px">${avatar(m, true)}<div class="grow"><h3>${esc(m.name)}</h3><div class="mut">${esc(i.c.planName)} · due ${fmtDate(i.c.due)}</div></div></div>
+    <div class="sm mut" style="margin-bottom:6px">Welcome message</div><div class="preview">${esc(msgFor(m, i))}</div>
+    <div class="actions"><a class="btn green" href="${waFor(m, i)}" target="_blank" rel="noopener" data-act="welcomesent" data-id="${m.id}">Send welcome on WhatsApp</a><button class="btn" data-act="closemodal">Later</button></div>`);
+}
 const empty = (t) => `<div class="card mut" style="text-align:center">${t}</div>`;
 
 // ------------------------------------------------------------------ DASHBOARD
@@ -499,7 +522,7 @@ function vMember(id) {
     <div class="mp-sub">${ic('phone')}<span>${esc(m.phone)} · ${m.batch} batch</span></div><div class="mp-badges">${statusBadge(i.status)} ${daysBadge(i.left)}</div></div>
     <button class="mp-kebab" data-act="mmenu" data-id="${m.id}" aria-label="More actions">${ic('dots')}</button></div>
     <div class="mp-btns"><button class="mp-btn pri" data-act="renew" data-id="${m.id}">${ic('refresh')}Renew</button>
-    <a class="mp-btn wa" href="${waFor(m, i)}" target="_blank" rel="noopener">${ic('whatsapp')}WhatsApp</a>
+    ${waBtn(m, i)}
     <a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a></div>
     ${i.balance ? `<button class="mp-collect" data-act="collect" data-id="${m.id}">${ic('wallet')}Collect pending ${money(i.balance)}</button>` : ''}</div>
   <div class="mp-tiles"><div class="mp-tile"><span>Total billed</span><b>${money(i.net)}</b></div><div class="mp-tile"><span>Total paid</span><b>${money(i.paid)}</b></div>
@@ -629,6 +652,7 @@ formHandlers.member = async (f) => {
       if (paid > 0) await addPayment(m, paid, d.mode, d.joinDate, net - paid);
       await saveMember(m);
       toast('Member added'); location.hash = '#/member/' + m.id;
+      setTimeout(() => offerWelcome(m), 250);
     }
   } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
@@ -798,7 +822,7 @@ const invFor = (a) => { const m = getMember(a.m), p = m.payments.find((x) => x.i
 // ------------------------------------------------------------------ REMINDERS
 function reminderRow(x, expired) {
   const { m, i } = x, tmr = i.left === 1;
-  const wa = `<a class="mp-btn wa" href="${waFor(m, i)}" target="_blank" rel="noopener">${ic('whatsapp')}WhatsApp</a>`;
+  const wa = waBtn(m, i);
   const call = `<a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a>`;
   const renew = `<button class="mp-btn pri" data-act="renew" data-id="${m.id}">${ic('refresh')}Renew</button>`;
   return `<div class="rem ${tmr ? 'tmr' : ''}"><div class="rem-top" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
@@ -806,15 +830,26 @@ function reminderRow(x, expired) {
     <div class="row2">${daysBadge(i.left)}${tmr ? '<span class="badge pulse">Remind today</span>' : ''}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>
     <div class="mp-btns">${expired ? renew + wa + call : wa + call + renew}</div></div>`;
 }
+function welcomeRow(x) {
+  const { m, i } = x;
+  return `<div class="rem"><div class="rem-top" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
+    <div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">Joined ${fmtDate(m.joinDate)} · Due ${fmtDate(i.c.due)}</div>
+    <div class="row2"><span class="badge blue">Welcome pending</span>${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>
+    <div class="mp-btns">${waBtn(m, i)}<a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a><button class="mp-btn" data-act="welcomeskip" data-id="${m.id}">Skip</button></div></div>`;
+}
 function vReminders() {
   setTitle('Renewal Reminders');
   const list = L(), soon = list.filter((x) => x.i.left >= 0 && x.i.left <= SOON_DAYS).sort((a, b) => a.i.left - b.i.left);
   const exp = list.filter((x) => x.i.left < 0).sort((a, b) => b.i.left - a.i.left);
-  const tab = S.rTab === 'expired' ? 'expired' : 'soon', tmr = soon.filter((x) => x.i.left === 1).length;
-  view(`<div class="seg"><button class="${tab === 'soon' ? 'on' : ''}" data-act="rtab" data-t="soon">Expiring soon <span class="cnt">${soon.length}</span></button><button class="${tab === 'expired' ? 'on' : ''}" data-act="rtab" data-t="expired">Already expired <span class="cnt">${exp.length}</span></button></div>
-    ${tab === 'soon'
-      ? `${tmr ? `<div class="rem-bar"><span>${ic('whatsapp')} ${tmr} expiring tomorrow</span><button data-act="walltomorrow">Send all</button></div>` : ''}${soon.map((x) => reminderRow(x, false)).join('') || empty('🎉 Nobody expiring soon')}`
-      : `${exp.map((x) => reminderRow(x, true)).join('') || empty('No expired members 🎉')}`}`);
+  const wel = list.filter((x) => isWelcome(x.m)).sort((a, b) => (b.m.createdAt || 0) - (a.m.createdAt || 0));
+  const tab = ['expired', 'welcome'].includes(S.rTab) ? S.rTab : 'soon', tmr = soon.filter((x) => x.i.left === 1).length;
+  const tb = (t, label, n) => `<button class="${tab === t ? 'on' : ''}" data-act="rtab" data-t="${t}">${label} <span class="cnt">${n}</span></button>`;
+  const body = tab === 'welcome'
+    ? wel.map(welcomeRow).join('') || empty('No new members waiting for a welcome message')
+    : tab === 'expired'
+      ? exp.map((x) => reminderRow(x, true)).join('') || empty('No expired members 🎉')
+      : `${tmr ? `<div class="rem-bar"><span>${ic('whatsapp')} ${tmr} expiring tomorrow</span><button data-act="walltomorrow">Send all</button></div>` : ''}${soon.map((x) => reminderRow(x, false)).join('') || empty('🎉 Nobody expiring soon')}`;
+  view(`<div class="seg three">${tb('soon', 'Expiring soon', soon.length)}${tb('expired', 'Expired', exp.length)}${tb('welcome', 'Welcome', wel.length)}</div>${body}`);
 }
 let walList = [], walIdx = 0;
 function walStep() {
@@ -931,7 +966,7 @@ async function restoreData(obj) {
     await b.commit();
   }
   const s = obj.settings || {};
-  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, logo: s.logo ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
+  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: s.welcomeTemplate ?? S.settings.welcomeTemplate ?? DEFAULT_WELCOME_TEMPLATE, logo: s.logo ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
 }
 async function latestCloudBackup() {
   const ids = (await getDocs(collection(db, 'gyms', uidOf(), 'backups'))).docs.map((d) => d.id).sort();
@@ -954,9 +989,10 @@ function vSettings() {
     <h2>Plans & pricing</h2><form class="card" data-form="plans"><div class="note">Price/duration changes apply only to new joinings and renewals. Past payments never change.</div><div class="err hide" data-err></div>
       <div id="planrows">${s.plans.map(planRow).join('')}</div>
       <div class="actions"><button type="button" class="btn" data-act="addplanrow">＋ Add plan</button><button class="btn primary" type="submit">Save plans</button></div></form>
-    <h2>WhatsApp reminder messages</h2><form class="card" data-form="template"><label>Expiring soon message<textarea name="template">${esc(s.template)}</textarea></label>
+    <h2>WhatsApp messages</h2><form class="card" data-form="template"><label>Welcome message (new members)<textarea name="welcomeTemplate">${esc(s.welcomeTemplate || DEFAULT_WELCOME_TEMPLATE)}</textarea></label>
+      <label>Expiring soon message<textarea name="template">${esc(s.template)}</textarea></label>
       <label>Already expired message<textarea name="expiredTemplate">${esc(s.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE)}</textarea></label>
-      <div class="sm mut" style="margin-bottom:10px">Use: {name} {plan} {date} {gym}</div><div class="actions"><button class="btn primary" type="submit">Save message</button><button type="button" class="btn" data-act="resettpl">Reset</button></div></form>
+      <div class="sm mut" style="margin-bottom:10px">Use: {name} {plan} {start} {date} {gym}. {start} is the start date and {date} is the due date. Members with more than 5 days left get no message.</div><div class="actions"><button class="btn primary" type="submit">Save message</button><button type="button" class="btn" data-act="resettpl">Reset</button></div></form>
   </div><div>
     <h2 style="margin-top:0">Backup & data</h2><div class="card"><div class="kv"><span>Last backup</span><b>${last}</b></div><div class="sm mut" style="margin:8px 0">A backup is saved automatically to the cloud once a day when you open the app (last 7 kept).</div>
       <div class="actions"><button class="btn" data-act="backupnow">☁️ Backup now</button><button class="btn" data-act="dlbackup">⬇️ Download all data</button></div>
@@ -995,7 +1031,7 @@ Object.assign(formHandlers, {
     try { await saveSettings({ plans: rows }); toast('Plans saved'); } catch (e) { showErr(f, errMsg(e)); }
     busy(f, false);
   },
-  async template(f) { const fd = new FormData(f); await saveSettings({ template: fd.get('template'), expiredTemplate: fd.get('expiredTemplate') }); toast('Messages saved'); },
+  async template(f) { const fd = new FormData(f); await saveSettings({ template: fd.get('template'), expiredTemplate: fd.get('expiredTemplate'), welcomeTemplate: fd.get('welcomeTemplate') }); toast('Messages saved'); },
   async password(f) {
     const d = Object.fromEntries(new FormData(f));
     if (d.n1.length < 8) return showErr(f, 'New password must be at least 8 characters.');
@@ -1035,7 +1071,9 @@ Object.assign(formHandlers, {
 const actions = {
   go(a) { if (a.to === '#/members') resetFilters(); location.hash = a.to; },
   filt(a) { resetFilters(); S.mTab = a.st === 'expired' ? 'expired' : 'active'; S.fPlan = a.plan || ''; S.fJoin = !!a.join; },
-  rtab(a) { S.rTab = a.t === 'expired' ? 'expired' : 'soon'; vReminders(); },
+  rtab(a) { S.rTab = ['expired', 'welcome'].includes(a.t) ? a.t : 'soon'; vReminders(); },
+  welcomesent(a) { setTimeout(closeModal, 300); return markWelcome(a.id, 'Welcome message sent on WhatsApp'); },
+  async welcomeskip(a) { await markWelcome(a.id, 'Welcome message skipped'); toast('Skipped'); },
   mtab(a) { S.mTab = a.t === 'expired' ? 'expired' : 'active'; drawMembers(); },
   clearfilters() { const t = S.mTab; resetFilters(); S.mTab = t; vMembers(); },
   back() {
@@ -1090,7 +1128,7 @@ const actions = {
   snap,
   addplanrow() { $('#planrows').insertAdjacentHTML('beforeend', planRow({ id: uid(), name: '', days: 30, price: 0 })); $('#planrows .planrow:last-child input')?.focus(); },
   rmplanrow(a, el) { el.closest('.planrow').remove(); },
-  resettpl() { $('[name=template]').value = DEFAULT_TEMPLATE; $('[name=expiredTemplate]').value = DEFAULT_EXPIRED_TEMPLATE; },
+  resettpl() { $('[name=template]').value = DEFAULT_TEMPLATE; $('[name=expiredTemplate]').value = DEFAULT_EXPIRED_TEMPLATE; $('[name=welcomeTemplate]').value = DEFAULT_WELCOME_TEMPLATE; },
   rmpin() { localStorage.removeItem('gm_pin'); toast('PIN turned off'); vSettings(); },
   dlmembers: () => exportCSV('members'), dlpayments: () => exportCSV('payments'), dlrenewals: () => exportCSV('renewals'),
   dlbackup() { download(`gym-backup-${stamp()}.json`, JSON.stringify(makeBackup()), 'application/json'); exportCSV('members'); exportCSV('payments'); exportCSV('renewals'); },

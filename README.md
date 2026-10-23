@@ -44,6 +44,7 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 - **Dashboard dues**: *Renewal dues* = members ending in the next 5 days + expired 2 days ago or less (amount = current plan price). *Unpaid balance* = money still owed on joined/renewed plans. Tap either card for the member list with Renew / WhatsApp / Call / Collect.
 - **Changing a joining or renewal start date** also moves that renewal's payment and invoice date, so monthly revenue and new-joinings counts land in the right month.
 - **Reminders** has two tabs (Expiring soon / Already expired). Expired members get their own WhatsApp message, editable in Settings.
+- **Welcome message**: after adding a member you can send a welcome on WhatsApp; it stays available on the Reminders > Welcome tab for the first day. WhatsApp then sends nothing while more than 5 days remain, a renewal reminder at 5 days or less, the expired message for 2 days after expiry, and nothing after that.
 - **Photos** are compressed (about 20-30 KB) and stored inside the database, so you do not need the paid Firebase Storage.
 - **Backups**: saved automatically once a day when you open the app (last 7 kept) + "Download all data" (JSON + 3 CSV files) + restore from file or cloud.
 - **Login with mobile number** works by looking up the email registered with that number. **Forgot password** emails a reset link to the registered email.

@@ -65,12 +65,13 @@ export function normPhone(v) {
   return d;
 }
 export const validPhone = (d) => /^[6-9]\d{9}$/.test(d);
-export const waLink = (phone, msg) => `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
+export const waLink = (phone, msg) => `https://wa.me/91${phone}${msg ? `?text=${encodeURIComponent(msg)}` : ''}`; // empty message = just open the chat
 export const fmtMsg = (tpl, v) =>
   String(tpl)
     .replace(/\{name\}/gi, v.name)
     .replace(/\{plan\}/gi, v.plan)
     .replace(/\{date\}/gi, v.date)
+    .replace(/\{start\}/gi, v.start ?? '')
     .replace(/\{(gym|gym name)\}/gi, v.gym);
 
 // ---------- files ----------
