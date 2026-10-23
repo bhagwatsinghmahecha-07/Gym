@@ -36,10 +36,11 @@ export function calcPeriod(prevDue, renewalDate, days) {
 
 export const curRenewal = (m) => m.renewals[m.renewals.length - 1];
 
+export const SOON_DAYS = 5; // "Expiring soon" = 0..5 days left
 export function memberInfo(m, today = todayStr()) {
   const c = curRenewal(m);
   const left = diffDays(c.due, today);
-  const status = left < 0 ? 'expired' : left <= 7 ? 'soon' : 'active';
+  const status = left < 0 ? 'expired' : left <= SOON_DAYS ? 'soon' : 'active';
   const net = m.renewals.reduce((a, r) => a + (+r.price || 0) - (+r.discount || 0), 0);
   const paid = m.payments.reduce((a, p) => a + (+p.amount || 0), 0);
   return { c, left, status, net, paid, balance: Math.max(0, net - paid) };
@@ -48,7 +49,7 @@ export function memberInfo(m, today = todayStr()) {
 export const daysText = (left) =>
   left < 0 ? `Expired ${-left} day${-left > 1 ? 's' : ''} ago` : left === 0 ? 'Expires today' : `${left} day${left > 1 ? 's' : ''} left`;
 export const daysBadge = (left) =>
-  `<span class="badge ${left < 0 ? 'red' : left <= 7 ? 'orange' : 'green'}">${daysText(left)}</span>`;
+  `<span class="badge ${left < 0 ? 'red' : left <= SOON_DAYS ? 'orange' : 'green'}">${daysText(left)}</span>`;
 export const statusBadge = (st) =>
   st === 'expired'
     ? '<span class="badge red">Expired</span>'

@@ -12,7 +12,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import {
-  $, $$, esc, money, uid, todayStr, addDays, diffDays, fmtDate, calcPeriod, curRenewal, memberInfo, daysBadge, daysText,
+  $, $$, esc, money, uid, todayStr, addDays, diffDays, fmtDate, calcPeriod, curRenewal, memberInfo, SOON_DAYS, daysBadge, daysText,
   statusBadge, normPhone, validPhone, waLink, fmtMsg, csv, download, compressImage,
 } from './util.js';
 import { invoiceData, printInvoice, invoiceBlob, shareInvoiceWhatsApp } from './invoice.js';
@@ -44,7 +44,7 @@ const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', p
 
 const S = {
   user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
-  route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', fJoin: false, batchTab: 'Morning',
+  route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', fJoin: false, mTab: 'active', batchTab: 'Morning',
   rmonth: todayStr().slice(0, 7), photo: '',
 };
 let unsubs = [];
@@ -312,6 +312,13 @@ const ICONS = {
   check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
   x: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  refresh: '<path d="M20 11a8 8 0 00-14-4L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0014 4l2-2"/><path d="M20 20v-5h-5"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A15 15 0 013 6a2 2 0 012-2z"/>',
+  whatsapp: '<path d="M3 21l1.7-5A9 9 0 1112 21a9 9 0 01-4.3-1.1z"/><path d="M9 9c0 3.5 2.5 6 6 6l1-1.5-2-1-1 .8a4 4 0 01-2-2l.8-1-1-2z"/>',
+  dots: '<circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  swap: '<path d="M4 8h14l-3-3"/><path d="M20 16H6l3 3"/>',
+  trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const NAV = [
@@ -338,7 +345,7 @@ function renderShell() {
 }
 function updateChrome() {
   $$('[data-gym]').forEach((e) => (e.textContent = S.settings.gymName));
-  const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= 7; }).length;
+  const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= SOON_DAYS; }).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
   $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard') || (S.route === 'edit' && b.dataset.r === 'members')));
   $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
@@ -352,7 +359,7 @@ const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add:
 const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'duelist', 'reports', 'member'];
 // our own page history so the Back button works inside the installed app too
 const navStack = [];
-const resetFilters = () => { S.q = ''; S.fPlan = ''; S.fBatch = ''; S.fStatus = ''; S.fJoin = false; };
+const resetFilters = () => { S.q = ''; S.fPlan = ''; S.fBatch = ''; S.fStatus = ''; S.fJoin = false; S.mTab = 'active'; };
 function route(keepScroll) {
   if (!S.user || !S.ready.s || !S.ready.m) return;
   if (!S.shell) renderShell();
@@ -399,7 +406,7 @@ function vDashboard() {
   setTitle('Dashboard');
   const list = L(), month = todayStr().slice(0, 7);
   const active = list.filter((x) => x.i.status !== 'expired');
-  const soon = list.filter((x) => x.i.left >= 0 && x.i.left <= 7).length;
+  const soon = list.filter((x) => x.i.left >= 0 && x.i.left <= SOON_DAYS).length;
   const revenue = S.members.flatMap((m) => m.payments).filter((p) => p.date.startsWith(month)).reduce((a, p) => a + p.amount, 0);
   const joins = S.members.filter((m) => m.joinDate.startsWith(month)).length;
   const dg = dueGroups();
@@ -415,9 +422,9 @@ function vDashboard() {
       ${stat('users', 'tone-blue', 'Total members', list.length, '#/members', 'data-act="filt"')}
       ${stat('check', 'tone-green', 'Active', active.length, '#/members', 'data-act="filt" data-st="live"')}
       ${stat('x', 'tone-red', 'Expired', list.length - active.length, '#/members', 'data-act="filt" data-st="expired"')}
-      ${stat('bell', 'tone-orange', 'Expiring in 7 days', soon, '#/reminders')}
-      ${stat('userplus', 'tone-violet', 'New joinings (month)', joins, '#/members', 'data-act="filt" data-join="1"')}
-      ${stat('rupee', 'tone-red', 'Renewal dues', money(dg.rTotal), '#/duelist/renewal', '', `${dg.renewal.length} member${dg.renewal.length === 1 ? '' : 's'} · ending ≤7 days or expired ≤5 days`)}
+      ${stat('bell', 'tone-orange', 'Expiring soon', soon, '#/reminders')}
+      ${stat('userplus', 'tone-violet', 'New joinings', joins, '#/members', 'data-act="filt" data-join="1"')}
+      ${stat('rupee', 'tone-red', 'Renewal dues', money(dg.rTotal), '#/duelist/renewal', '', `${dg.renewal.length} member${dg.renewal.length === 1 ? '' : 's'}`)}
       ${stat('wallet', 'tone-orange', 'Unpaid balance', money(dg.uTotal), '#/duelist/unpaid', '', `${dg.unpaid.length} member${dg.unpaid.length === 1 ? '' : 's'} still owe money`)}</div>
     <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<a class="kv" href="#/members" data-act="filt" data-st="live" data-plan="${esc(n)}"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length} ›</b></a>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
@@ -433,7 +440,7 @@ function vMembers() {
     <div class="toolbar"><input id="q" type="search" placeholder="Search name or phone" value="${esc(S.q)}">
     <select id="fPlan"><option value="">All plans</option>${opt(S.settings.plans.map((p) => [p.name, p.name]), S.fPlan)}</select>
     <select id="fBatch"><option value="">All batches</option>${opt([['Morning', 'Morning'], ['Evening', 'Evening']], S.fBatch)}</select>
-    <select id="fStatus"><option value="">All status</option>${opt([['live', 'Active + Expiring soon'], ['active', 'Active only'], ['soon', 'Expiring Soon'], ['expired', 'Expired']], S.fStatus)}</select></div>
+</div>
     <div id="mlist"></div>`);
   drawMembers();
 }
@@ -444,15 +451,19 @@ const SORT_KEYS = {
 function drawMembers() {
   const box = $('#mlist'); if (!box) return;
   const q = S.q.trim().toLowerCase();
-  let list = L().filter((x) =>
+  const base = L().filter((x) =>
     (!q || x.m.name.toLowerCase().includes(q) || x.m.phone.includes(q.replace(/\D/g, '') || '§')) &&
-    (!S.fPlan || x.i.c.planName === S.fPlan) && (!S.fBatch || x.m.batch === S.fBatch) && (!S.fStatus || (S.fStatus === 'live' ? x.i.status !== 'expired' : x.i.status === S.fStatus)) && (!S.fJoin || x.m.joinDate.startsWith(todayStr().slice(0, 7))));
-  const chips = (q || S.fPlan || S.fBatch || S.fStatus || S.fJoin) ? `<div class="chips">${S.fJoin ? '<span class="badge blue">Joined this month</span>' : ''}<button class="btn sm" data-act="clearfilters">✕ Clear filters</button></div>` : '';
+    (!S.fPlan || x.i.c.planName === S.fPlan) && (!S.fBatch || x.m.batch === S.fBatch) && (!S.fJoin || x.m.joinDate.startsWith(todayStr().slice(0, 7))));
+  // Active and Expired are kept in separate lists (tabs). "New joinings" shows everyone who joined this month in one list.
+  const nAct = base.filter((x) => x.i.status !== 'expired').length, nExp = base.length - nAct;
+  const tabs = S.fJoin ? '' : `<div class="seg"><button class="${S.mTab === 'active' ? 'on' : ''}" data-act="mtab" data-t="active">Active (${nAct})</button><button class="${S.mTab === 'expired' ? 'on' : ''}" data-act="mtab" data-t="expired">Expired (${nExp})</button></div>`;
+  let list = S.fJoin ? base : base.filter((x) => (S.mTab === 'expired' ? x.i.status === 'expired' : x.i.status !== 'expired'));
+  const chips = (q || S.fPlan || S.fBatch || S.fJoin) ? `<div class="chips">${S.fJoin ? '<span class="badge blue">New joinings (this month)</span>' : ''}<button class="btn sm" data-act="clearfilters">✕ Clear filters</button></div>` : '';
   const f = SORT_KEYS[S.sort.k];
   list.sort((a, b) => (f(a) > f(b) ? 1 : f(a) < f(b) ? -1 : 0) * S.sort.d);
-  if (!list.length) return (box.innerHTML = chips + empty(S.members.length ? 'No members match your search/filters.' : 'No members yet. Tap <b>＋ Add Member</b> to add your first one.'));
+  if (!list.length) return (box.innerHTML = tabs + chips + empty(S.members.length ? (S.fJoin ? 'Nobody has joined this month yet.' : S.mTab === 'expired' && !q && !S.fPlan && !S.fBatch ? 'No expired members 🎉' : 'No members match your search/filters.') : 'No members yet. Tap <b>＋ Add Member</b> to add your first one.'));
   const th = (k, l) => `<th data-act="sort" data-k="${k}">${l}${S.sort.k === k ? (S.sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-  box.innerHTML = `${chips}<div class="mut sm" style="margin-bottom:8px">${list.length} member${list.length > 1 ? 's' : ''}</div>
+  box.innerHTML = `${tabs}${chips}<div class="mut sm" style="margin-bottom:8px">${list.length} member${list.length > 1 ? 's' : ''}</div>
   <div class="cards-only">${list.map(({ m, i }) => `<div class="mcard" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
     <div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">Due ${fmtDate(i.c.due)}</div>
     <div class="row2">${daysBadge(i.left)}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>`).join('')}</div>
@@ -467,24 +478,25 @@ function vMember(id) {
   const i = memberInfo(m);
   setTitle(m.name);
   const rens = [...m.renewals].reverse(), pays = [...m.payments].reverse();
+  const total = Math.max(1, diffDays(i.c.due, i.c.start)), used = Math.min(100, Math.max(0, Math.round((diffDays(todayStr(), i.c.start) / total) * 100)));
   view(`<a href="#/members" class="sm">‹ All members</a>
-  <div class="card" style="margin-top:8px"><div class="head">${avatar(m, true)}<div class="grow"><h2 style="margin:0">${esc(m.name)}</h2>
-    <div class="mut">📞 ${esc(m.phone)} · ${m.batch} batch</div><div style="margin-top:6px">${statusBadge(i.status)} ${daysBadge(i.left)}</div></div></div>
-    <div class="actions"><button class="btn primary" data-act="renew" data-id="${m.id}">🔄 Renew</button>
-    <a class="btn green" href="${waFor(m, i)}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="tel:${m.phone}">📞 Call</a>
-    ${i.balance ? `<button class="btn" data-act="collect" data-id="${m.id}">💰 Collect ${money(i.balance)}</button>` : ''}
-    <button class="btn" data-act="go" data-to="#/edit/${m.id}">✏️ Edit</button>
-    <button class="btn" data-act="movebatch" data-id="${m.id}">⇄ Move to ${m.batch === 'Morning' ? 'Evening' : 'Morning'}</button>
-    <button class="btn danger" data-act="delmember" data-id="${m.id}">🗑 Delete</button></div></div>
+  <div class="mp-card"><div class="mp-head">${avatar(m, true)}<div class="mp-id"><h2>${esc(m.name)}</h2>
+    <div class="mp-sub">${ic('phone')}<span>${esc(m.phone)} · ${m.batch} batch</span></div><div class="mp-badges">${statusBadge(i.status)} ${daysBadge(i.left)}</div></div>
+    <button class="mp-kebab" data-act="mmenu" data-id="${m.id}" aria-label="More actions">${ic('dots')}</button></div>
+    <div class="mp-btns"><button class="mp-btn pri" data-act="renew" data-id="${m.id}">${ic('refresh')}Renew</button>
+    <a class="mp-btn wa" href="${waFor(m, i)}" target="_blank" rel="noopener">${ic('whatsapp')}WhatsApp</a>
+    <a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a></div>
+    ${i.balance ? `<button class="mp-collect" data-act="collect" data-id="${m.id}">${ic('wallet')}Collect pending ${money(i.balance)}</button>` : ''}</div>
+  <div class="mp-tiles"><div class="mp-tile"><span>Total billed</span><b>${money(i.net)}</b></div><div class="mp-tile"><span>Total paid</span><b>${money(i.paid)}</b></div>
+    <div class="mp-tile"><span>Pending</span><b style="color:${i.balance ? 'var(--red)' : 'var(--green)'}">${money(i.balance)}</b></div></div>
   <div class="dash"><div><h2>Subscription</h2><div class="card">
-    <div class="kv"><span>Current plan</span><b>${esc(i.c.planName)}</b></div><div class="kv"><span>Start date</span><b>${fmtDate(i.c.start)}</b></div>
-    <div class="kv"><span>Due date</span><b>${fmtDate(i.c.due)}</b></div><div class="kv"><span>Days left</span><b>${daysText(i.left)}</b></div>
-    <div class="kv"><span>Total billed</span><b>${money(i.net)}</b></div><div class="kv"><span>Total paid</span><b>${money(i.paid)}</b></div>
-    <div class="kv"><span>Pending balance</span><b style="color:${i.balance ? 'var(--red)' : 'var(--green)'}">${money(i.balance)}</b></div>
-    <button class="btn block" style="margin-top:10px" data-act="editrenew" data-id="${m.id}">✏️ Edit renewal date / plan</button></div></div>
+    <div class="mp-prog-h"><b>${esc(i.c.planName)}</b><span class="mut sm">${daysText(i.left)}</span></div>
+    <div class="mp-bar"><i style="width:${used}%"></i></div>
+    <div class="mp-prog-f"><span>Start ${fmtDate(i.c.start)}</span><span>Due ${fmtDate(i.c.due)}</span></div>
+    <button class="btn block" style="margin-top:14px" data-act="editrenew" data-id="${m.id}">${ic('edit')} Edit renewal date / plan</button></div></div>
   <div><h2>Details</h2><div class="card">
-    ${[['Age', m.age], ['Gender', m.gender], ['Joined', fmtDate(m.joinDate)], ['Emergency contact', m.emergency], ['Address', m.address], ['Notes', m.notes]].map(([k, v]) => `<div class="kv"><span>${k}</span><b style="text-align:right;max-width:60%">${esc(v) || '-'}</b></div>`).join('')}</div></div></div>
-  <h2>Renewal history</h2><div class="tablewrap"><table><thead><tr><th>Renewed on</th><th>Plan</th><th>Amount</th><th>Discount</th><th>Start</th><th>Due</th></tr></thead><tbody>
+    ${[['Age', m.age], ['Gender', m.gender], ['Joined', fmtDate(m.joinDate)], ['Emergency contact', m.emergency], ['Address', m.address], ['Notes', m.notes]].map(([k, v]) => `<div class="kv"><span class="mut">${k}</span><b style="text-align:right;max-width:60%">${esc(v) || '-'}</b></div>`).join('')}</div></div></div>
+    <h2>Renewal history</h2><div class="tablewrap"><table><thead><tr><th>Renewed on</th><th>Plan</th><th>Amount</th><th>Discount</th><th>Start</th><th>Due</th></tr></thead><tbody>
     ${rens.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(r.planName)}</td><td>${money(r.price)}</td><td>${money(r.discount)}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.due)}</td></tr>`).join('')}</tbody></table></div>
   <h2>Payment history & invoices</h2>${pays.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Invoice</th><th></th></tr></thead><tbody>
     ${pays.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${money(p.amount)}</td><td>${p.mode}</td><td>${esc(p.invoiceNo || '-')}</td><td><button class="btn sm" data-act="invoice" data-id="${m.id}" data-p="${p.id}">🧾 Invoice</button></td></tr>`).join('')}</tbody></table></div>` : empty('No payments yet')}
@@ -778,11 +790,11 @@ function reminderRow(x) {
 }
 function vReminders() {
   setTitle('Renewal Reminders');
-  const list = L(), soon = list.filter((x) => x.i.left >= 0 && x.i.left <= 7).sort((a, b) => a.i.left - b.i.left);
+  const list = L(), soon = list.filter((x) => x.i.left >= 0 && x.i.left <= SOON_DAYS).sort((a, b) => a.i.left - b.i.left);
   const exp = list.filter((x) => x.i.left < 0).sort((a, b) => b.i.left - a.i.left);
   const tmr = soon.filter((x) => x.i.left === 1).length;
   view(`${tmr ? `<button class="btn primary block" data-act="walltomorrow" style="margin-bottom:6px">📲 Send to all expiring tomorrow (${tmr})</button>` : ''}
-    <h2>Expiring in the next 7 days (${soon.length})</h2>${soon.map(reminderRow).join('') || empty('🎉 Nobody expiring in the next 7 days')}
+    <h2>Expiring soon (${soon.length})</h2>${soon.map(reminderRow).join('') || empty('🎉 Nobody expiring soon')}
     <h2>Already expired (${exp.length})</h2>${exp.map(reminderRow).join('') || empty('No expired members')}`);
 }
 let walList = [], walIdx = 0;
@@ -805,9 +817,9 @@ function vBatches() {
 }
 
 // ------------------------------------------------------------------ DUE GROUPS (dashboard cards + detail list)
-// Renewal dues   = membership ends within the next 7 days, or expired 5 days ago or less. Amount = member's current plan price.
+// Renewal dues   = membership ends within the next 5 days, or expired 2 days ago or less. Amount = member's current plan price.
 // Unpaid balance = money still owed on a plan already joined/renewed. Amount = pending balance.
-const RENEW_AHEAD = 7, RENEW_GRACE = 5;
+const RENEW_AHEAD = 5, RENEW_GRACE = 2;
 function dueGroups() {
   const list = L();
   const renewal = list.filter((x) => x.i.left <= RENEW_AHEAD && x.i.left >= -RENEW_GRACE).sort((a, b) => a.i.left - b.i.left);
@@ -1002,8 +1014,9 @@ Object.assign(formHandlers, {
 // ------------------------------------------------------------------ actions (click delegation)
 const actions = {
   go(a) { if (a.to === '#/members') resetFilters(); location.hash = a.to; },
-  filt(a) { resetFilters(); S.fStatus = a.st || ''; S.fPlan = a.plan || ''; S.fJoin = !!a.join; },
-  clearfilters() { resetFilters(); vMembers(); },
+  filt(a) { resetFilters(); S.mTab = a.st === 'expired' ? 'expired' : 'active'; S.fPlan = a.plan || ''; S.fJoin = !!a.join; },
+  mtab(a) { S.mTab = a.t === 'expired' ? 'expired' : 'active'; drawMembers(); },
+  clearfilters() { const t = S.mTab; resetFilters(); S.mTab = t; vMembers(); },
   back() {
     const cur = location.hash || '#/dashboard';
     if (navStack[navStack.length - 1] === cur) navStack.pop();
@@ -1012,11 +1025,32 @@ const actions = {
   },
   auth: (a) => authScreen(a.to),
   eye(a, el) { const i = el.parentElement.querySelector('input'); i.type = i.type === 'password' ? 'text' : 'password'; },
-  logout() { sessionStorage.removeItem('gm_unlocked'); signOut(auth); },
+  logout() {
+    // switch to the login screen immediately; Firebase finishes signing out in the background
+    if (S.loggingOut) return; S.loggingOut = true;
+    sessionStorage.removeItem('gm_unlocked');
+    closeModal(); unsubs.forEach((u) => u()); unsubs = [];
+    S.user = null; S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
+    $('#lock').innerHTML = ''; authScreen('login');
+    signOut(auth).catch(() => {}).finally(() => { S.loggingOut = false; });
+  },
   resendverify() { sendEmailVerification(S.user).then(() => toast('Verification email sent')).catch((e) => toast(errMsg(e), 'err')); },
   closemodal: closeModal,
+  mmenu(a) {
+    const m = getMember(a.id); if (!m) return; const i = memberInfo(m), other = m.batch === 'Morning' ? 'Evening' : 'Morning';
+    openModal('Manage member', `<div class="mm-list">
+      <button class="mm-row" data-act="mact" data-do="go" data-to="#/edit/${m.id}">${ic('edit')}<span>Edit details</span></button>
+      <button class="mm-row" data-act="mact" data-do="movebatch" data-id="${m.id}">${ic('swap')}<span>Move to ${other} batch</span></button>
+      ${i.balance ? `<button class="mm-row" data-act="mact" data-do="collect" data-id="${m.id}">${ic('wallet')}<span>Collect ${money(i.balance)}</span></button>` : ''}
+      <button class="mm-row danger" data-act="mact" data-do="delmember" data-id="${m.id}">${ic('trash')}<span>Delete member<small>Also removes payment history</small></span></button></div>`);
+  },
+  mact(a) { closeModal(); actions[a.do]?.(a); },
   ovclick(a, el, e) { if (e.target === el) closeModal(); },
-  more() { openModal('More', `<div class="actions" style="flex-direction:column">${NAV.filter((n) => ['batches', 'dues', 'reports', 'settings'].includes(n[0])).map(([r, i, l]) => `<button class="btn" data-act="go" data-to="#/${r}">${ic(i)} ${l}</button>`).join('')}<button class="btn danger" data-act="logout">${ic('logout')} Logout</button></div>`); },
+  more() {
+    const tiles = [['batches', 'clock', 'Batches', 'Morning and evening'], ['dues', 'wallet', 'Payments and dues', 'Collect and track'], ['reports', 'chart', 'Reports', 'Revenue and joinings'], ['settings', 'gear', 'Settings', 'Plans, backup, account']];
+    openModal('More', `<div class="more-grid">${tiles.map(([r, i, l, d]) => `<button class="more-tile" data-act="go" data-to="#/${r}"><span class="more-ic">${ic(i)}</span><b>${l}</b><small>${d}</small></button>`).join('')}</div>
+      <button class="more-out" data-act="logout">${ic('logout')} Log out</button>`);
+  },
   sort(a) { S.sort = { k: a.k, d: S.sort.k === a.k ? -S.sort.d : 1 }; drawMembers(); },
   open: (a) => (location.hash = '#/member/' + a.id),
   renew: (a) => openRenew(a.id),
@@ -1065,7 +1099,6 @@ document.addEventListener('input', (e) => {
   if (t.id === 'q') { S.q = t.value; drawMembers(); }
   else if (t.id === 'fPlan') { S.fPlan = t.value; drawMembers(); }
   else if (t.id === 'fBatch') { S.fBatch = t.value; drawMembers(); }
-  else if (t.id === 'fStatus') { S.fStatus = t.value; drawMembers(); }
   else if (t.id === 'rmonth' && t.value) { S.rmonth = t.value; vReports(); }
   else if (t.closest('#mform')) updateAddPreview(t.name === 'plan' || t.name === 'discount' || t.name === 'joinDate' ? t.name !== 'joinDate' : false);
 });

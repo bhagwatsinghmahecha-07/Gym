@@ -41,7 +41,7 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 ## How things work
 - **Due date** = start date + plan days (30 / 90 / 180 / 365, editable). Renewing an active member starts the new period at the old due date; an expired member starts on the renewal date. The renewal screen shows start, due date and days left before you save.
 - **Edit renewal**: member profile > *Edit renewal date / plan*. Due date, status, reminders, dashboard and invoices update automatically; edits are logged. Only the member's current (latest) renewal can be edited.
-- **Dashboard dues**: *Renewal dues* = members ending in the next 7 days + expired 5 days ago or less (amount = current plan price). *Unpaid balance* = money still owed on joined/renewed plans. Tap either card for the member list with Renew / WhatsApp / Call / Collect.
+- **Dashboard dues**: *Renewal dues* = members ending in the next 5 days + expired 2 days ago or less (amount = current plan price). *Unpaid balance* = money still owed on joined/renewed plans. Tap either card for the member list with Renew / WhatsApp / Call / Collect.
 - **Changing a joining or renewal start date** also moves that renewal's payment and invoice date, so monthly revenue and new-joinings counts land in the right month.
 - **Photos** are compressed (about 20-30 KB) and stored inside the database, so you do not need the paid Firebase Storage.
 - **Backups**: saved automatically once a day when you open the app (last 7 kept) + "Download all data" (JSON + 3 CSV files) + restore from file or cloud.
