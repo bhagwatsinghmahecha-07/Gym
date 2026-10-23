@@ -40,12 +40,14 @@ const DEFAULT_PLANS = [
 ];
 const DEFAULT_TEMPLATE =
   'Hello {name}, your {plan} gym membership expires on {date}. Please renew your subscription to continue your workouts. Thank you! - {gym}';
-const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, logo: '', invSeq: 0 };
+const DEFAULT_EXPIRED_TEMPLATE =
+  'Hello {name}, your {plan} gym membership expired on {date}. We miss you at the gym! Renew now to get back to your workouts. - {gym}';
+const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, logo: '', invSeq: 0 };
 
 const S = {
   user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
   route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', fJoin: false, mTab: 'active', batchTab: 'Morning',
-  rmonth: todayStr().slice(0, 7), photo: '',
+  rmonth: todayStr().slice(0, 7), photo: '', rTab: 'soon',
 };
 let unsubs = [];
 const isTouch = matchMedia('(pointer:coarse)').matches;
@@ -263,12 +265,23 @@ onAuthStateChanged(auth, (user) => {
   if (inactiveTooLong()) { signOut(auth); return; }
   touchActivity();
   root.innerHTML = '<div class="splash">🏋️ Loading your gym…</div>';
-  const fail = (e) => toast(errMsg(e), 'err');
-  unsubs.push(onSnapshot(sref(), (snap) => { S.settings = { ...DEF_SETTINGS, ...(snap.data() || {}) }; S.ready.s = true; afterData(); }, fail));
-  unsubs.push(onSnapshot(collection(db, 'gyms', user.uid, 'members'), (snap) => {
+  // On a page refresh the first read can reach the database before the restored sign-in token is attached
+  // ("permission-denied"). Refresh the token and re-subscribe quietly; only show an error if it keeps failing.
+  const listen = (q, next, tries = 0) => {
+    unsubs.push(onSnapshot(q, next, async (e) => {
+      if (e.code === 'permission-denied' && tries < 3 && S.user && S.user.uid === user.uid) {
+        try { await user.getIdToken(true); } catch { /* ignore */ }
+        setTimeout(() => { if (S.user && S.user.uid === user.uid) listen(q, next, tries + 1); }, 700 * (tries + 1));
+        return;
+      }
+      toast(errMsg(e), 'err');
+    }));
+  };
+  listen(sref(), (snap) => { S.settings = { ...DEF_SETTINGS, ...(snap.data() || {}) }; S.ready.s = true; afterData(); });
+  listen(collection(db, 'gyms', user.uid, 'members'), (snap) => {
     S.members = snap.docs.map((d) => { const m = { id: d.id, ...d.data() }; m.renewals ||= []; m.payments ||= []; m.logs ||= []; return m; }).filter((m) => m.renewals.length);
     S.ready.m = true; afterData();
-  }, fail));
+  });
   showLock();
 });
 
@@ -398,7 +411,9 @@ const initials = (n) => (n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[
 const avatar = (m, lg) => (m.photo ? `<img class="av ${lg ? 'lg' : ''}" src="${m.photo}" alt="">` : `<div class="av ${lg ? 'lg' : ''}">${esc(initials(m.name))}</div>`);
 const L = () => S.members.map((m) => ({ m, i: memberInfo(m) }));
 const planOptions = (sel) => S.settings.plans.map((p) => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)} - ${money(p.price)} (${p.days} days)</option>`).join('');
-const waFor = (m, i) => waLink(m.phone, fmtMsg(S.settings.template, { name: m.name, plan: i.c.planName, date: fmtDate(i.c.due), gym: S.settings.gymName }));
+// expired members get the "expired" message, everyone else the normal reminder
+const msgFor = (m, i) => fmtMsg(i.left < 0 ? S.settings.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE : S.settings.template, { name: m.name, plan: i.c.planName, date: fmtDate(i.c.due), gym: S.settings.gymName });
+const waFor = (m, i) => waLink(m.phone, msgFor(m, i));
 const empty = (t) => `<div class="card mut" style="text-align:center">${t}</div>`;
 
 // ------------------------------------------------------------------ DASHBOARD
@@ -781,28 +796,32 @@ function openInvoice(mid, pid) {
 const invFor = (a) => { const m = getMember(a.m), p = m.payments.find((x) => x.id === a.p); return invoiceData(S.settings, m, p); };
 
 // ------------------------------------------------------------------ REMINDERS
-function reminderRow(x) {
-  const { m, i } = x;
-  return `<div class="rrow ${i.left === 1 ? 'tmr' : ''}">${avatar(m)}<div class="info"><div><b>${esc(m.name)}</b> ${i.left === 1 ? '<span class="badge pulse">Send reminder today</span>' : ''}</div>
-    <div class="sm mut">${esc(i.c.planName)} · ${m.batch} · due ${fmtDate(i.c.due)}</div><div style="margin-top:4px">${daysBadge(i.left)}${i.balance ? ` <span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div>
-    <div class="acts"><a class="btn green" href="${waFor(m, i)}" target="_blank" rel="noopener">WhatsApp Reminder</a><a class="btn" href="tel:${m.phone}">📞 Call</a>
-    <button class="btn primary" data-act="renew" data-id="${m.id}">Renew Now</button></div></div>`;
+function reminderRow(x, expired) {
+  const { m, i } = x, tmr = i.left === 1;
+  const wa = `<a class="mp-btn wa" href="${waFor(m, i)}" target="_blank" rel="noopener">${ic('whatsapp')}WhatsApp</a>`;
+  const call = `<a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a>`;
+  const renew = `<button class="mp-btn pri" data-act="renew" data-id="${m.id}">${ic('refresh')}Renew</button>`;
+  return `<div class="rem ${tmr ? 'tmr' : ''}"><div class="rem-top" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
+    <div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">${expired ? 'Expired' : 'Due'} ${fmtDate(i.c.due)}</div>
+    <div class="row2">${daysBadge(i.left)}${tmr ? '<span class="badge pulse">Remind today</span>' : ''}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>
+    <div class="mp-btns">${expired ? renew + wa + call : wa + call + renew}</div></div>`;
 }
 function vReminders() {
   setTitle('Renewal Reminders');
   const list = L(), soon = list.filter((x) => x.i.left >= 0 && x.i.left <= SOON_DAYS).sort((a, b) => a.i.left - b.i.left);
   const exp = list.filter((x) => x.i.left < 0).sort((a, b) => b.i.left - a.i.left);
-  const tmr = soon.filter((x) => x.i.left === 1).length;
-  view(`${tmr ? `<button class="btn primary block" data-act="walltomorrow" style="margin-bottom:6px">📲 Send to all expiring tomorrow (${tmr})</button>` : ''}
-    <h2>Expiring soon (${soon.length})</h2>${soon.map(reminderRow).join('') || empty('🎉 Nobody expiring soon')}
-    <h2>Already expired (${exp.length})</h2>${exp.map(reminderRow).join('') || empty('No expired members')}`);
+  const tab = S.rTab === 'expired' ? 'expired' : 'soon', tmr = soon.filter((x) => x.i.left === 1).length;
+  view(`<div class="seg"><button class="${tab === 'soon' ? 'on' : ''}" data-act="rtab" data-t="soon">Expiring soon <span class="cnt">${soon.length}</span></button><button class="${tab === 'expired' ? 'on' : ''}" data-act="rtab" data-t="expired">Already expired <span class="cnt">${exp.length}</span></button></div>
+    ${tab === 'soon'
+      ? `${tmr ? `<div class="rem-bar"><span>${ic('whatsapp')} ${tmr} expiring tomorrow</span><button data-act="walltomorrow">Send all</button></div>` : ''}${soon.map((x) => reminderRow(x, false)).join('') || empty('🎉 Nobody expiring soon')}`
+      : `${exp.map((x) => reminderRow(x, true)).join('') || empty('No expired members 🎉')}`}`);
 }
 let walList = [], walIdx = 0;
 function walStep() {
   const x = walList[walIdx];
   if (!x) { closeModal(); return toast('All reminders done ✅'); }
   openModal(`Reminder ${walIdx + 1} of ${walList.length}`, `<div class="head" style="margin-bottom:12px">${avatar(x.m, true)}<div class="grow"><h3>${esc(x.m.name)}</h3><div class="mut">${esc(x.i.c.planName)} · expires ${fmtDate(x.i.c.due)}</div></div></div>
-    <div class="preview">${esc(fmtMsg(S.settings.template, { name: x.m.name, plan: x.i.c.planName, date: fmtDate(x.i.c.due), gym: S.settings.gymName }))}</div>
+    <div class="preview">${esc(msgFor(x.m, x.i))}</div>
     <div class="actions"><a class="btn green" href="${waFor(x.m, x.i)}" target="_blank" rel="noopener" data-act="walnext">Open WhatsApp & next ›</a><button class="btn" data-act="walnext">Skip ›</button></div>`);
 }
 
@@ -912,7 +931,7 @@ async function restoreData(obj) {
     await b.commit();
   }
   const s = obj.settings || {};
-  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, logo: s.logo ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
+  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, logo: s.logo ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
 }
 async function latestCloudBackup() {
   const ids = (await getDocs(collection(db, 'gyms', uidOf(), 'backups'))).docs.map((d) => d.id).sort();
@@ -935,7 +954,8 @@ function vSettings() {
     <h2>Plans & pricing</h2><form class="card" data-form="plans"><div class="note">Price/duration changes apply only to new joinings and renewals. Past payments never change.</div><div class="err hide" data-err></div>
       <div id="planrows">${s.plans.map(planRow).join('')}</div>
       <div class="actions"><button type="button" class="btn" data-act="addplanrow">＋ Add plan</button><button class="btn primary" type="submit">Save plans</button></div></form>
-    <h2>WhatsApp reminder message</h2><form class="card" data-form="template"><label>Message template<textarea name="template">${esc(s.template)}</textarea></label>
+    <h2>WhatsApp reminder messages</h2><form class="card" data-form="template"><label>Expiring soon message<textarea name="template">${esc(s.template)}</textarea></label>
+      <label>Already expired message<textarea name="expiredTemplate">${esc(s.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE)}</textarea></label>
       <div class="sm mut" style="margin-bottom:10px">Use: {name} {plan} {date} {gym}</div><div class="actions"><button class="btn primary" type="submit">Save message</button><button type="button" class="btn" data-act="resettpl">Reset</button></div></form>
   </div><div>
     <h2 style="margin-top:0">Backup & data</h2><div class="card"><div class="kv"><span>Last backup</span><b>${last}</b></div><div class="sm mut" style="margin:8px 0">A backup is saved automatically to the cloud once a day when you open the app (last 7 kept).</div>
@@ -975,7 +995,7 @@ Object.assign(formHandlers, {
     try { await saveSettings({ plans: rows }); toast('Plans saved'); } catch (e) { showErr(f, errMsg(e)); }
     busy(f, false);
   },
-  async template(f) { await saveSettings({ template: new FormData(f).get('template') }); toast('Message saved'); },
+  async template(f) { const fd = new FormData(f); await saveSettings({ template: fd.get('template'), expiredTemplate: fd.get('expiredTemplate') }); toast('Messages saved'); },
   async password(f) {
     const d = Object.fromEntries(new FormData(f));
     if (d.n1.length < 8) return showErr(f, 'New password must be at least 8 characters.');
@@ -1015,6 +1035,7 @@ Object.assign(formHandlers, {
 const actions = {
   go(a) { if (a.to === '#/members') resetFilters(); location.hash = a.to; },
   filt(a) { resetFilters(); S.mTab = a.st === 'expired' ? 'expired' : 'active'; S.fPlan = a.plan || ''; S.fJoin = !!a.join; },
+  rtab(a) { S.rTab = a.t === 'expired' ? 'expired' : 'soon'; vReminders(); },
   mtab(a) { S.mTab = a.t === 'expired' ? 'expired' : 'active'; drawMembers(); },
   clearfilters() { const t = S.mTab; resetFilters(); S.mTab = t; vMembers(); },
   back() {
@@ -1069,7 +1090,7 @@ const actions = {
   snap,
   addplanrow() { $('#planrows').insertAdjacentHTML('beforeend', planRow({ id: uid(), name: '', days: 30, price: 0 })); $('#planrows .planrow:last-child input')?.focus(); },
   rmplanrow(a, el) { el.closest('.planrow').remove(); },
-  resettpl() { $('[name=template]').value = DEFAULT_TEMPLATE; },
+  resettpl() { $('[name=template]').value = DEFAULT_TEMPLATE; $('[name=expiredTemplate]').value = DEFAULT_EXPIRED_TEMPLATE; },
   rmpin() { localStorage.removeItem('gm_pin'); toast('PIN turned off'); vSettings(); },
   dlmembers: () => exportCSV('members'), dlpayments: () => exportCSV('payments'), dlrenewals: () => exportCSV('renewals'),
   dlbackup() { download(`gym-backup-${stamp()}.json`, JSON.stringify(makeBackup()), 'application/json'); exportCSV('members'); exportCSV('payments'); exportCSV('renewals'); },
