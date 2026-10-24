@@ -15,7 +15,7 @@ import {
   $, $$, esc, money, uid, todayStr, addDays, diffDays, fmtDate, calcPeriod, curRenewal, memberInfo, SOON_DAYS, daysBadge, daysText,
   statusBadge, normPhone, validPhone, waLink, fmtMsg, csv, download, compressImage,
 } from './util.js';
-import { invoiceData, printInvoice, invoiceBlob, shareInvoiceWhatsApp } from './invoice.js';
+import { invoiceData, printInvoice, invoiceBlob, shareInvoiceWhatsApp, renderInvoicePages } from './invoice.js';
 
 const root = $('#root');
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('PASTE');
@@ -44,7 +44,7 @@ const DEFAULT_EXPIRED_TEMPLATE =
   'Hello {name}, your {plan} gym membership expired on {date}. We miss you at the gym! Renew now to get back to your workouts. - {gym}';
 const DEFAULT_WELCOME_TEMPLATE =
   'Welcome to {gym}, {name}! Your {plan} membership is active from {start} to {date}. We are glad to have you with us. See you at the gym! - {gym}';
-const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', invSeq: 0 };
+const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', terms: '', rules: '', invSeq: 0 };
 
 const S = {
   user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
@@ -106,7 +106,7 @@ function authScreen(mode = 'login', msg = '') {
       <div class="links"><button class="linkbtn" data-act="auth" data-to="login">← Back to login</button></div>`,
   };
   S.shell = false;
-  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-logo">${ic('dumbbell')}</div><div class="brand">Gym Manager</div>${forms[mode]}</div></div>`;
+  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand">Gym Manager</div>${forms[mode]}</div></div>`;
 }
 
 const errMsg = (e) =>
@@ -237,7 +237,7 @@ document.addEventListener('visibilitychange', () => {
 });
 function showLock() {
   if (!localStorage.getItem('gm_pin') || sessionStorage.getItem('gm_unlocked') || !S.user) return ($('#lock').innerHTML = '');
-  $('#lock').innerHTML = `<div class="lockov"><div class="auth-card"><div class="brand">🔒 Enter PIN</div><p>Enter your 4-digit app PIN</p>
+  $('#lock').innerHTML = `<div class="lockov"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand">🔒 Enter PIN</div><p>Enter your 4-digit app PIN</p>
     <form data-form="unlock"><input name="pin" type="password" inputmode="numeric" maxlength="4" pattern="\\d{4}" autocomplete="off" required autofocus>
     <div class="err hide" data-err style="margin-top:12px"></div><button class="btn primary block" style="margin-top:12px">Unlock</button></form>
     <div class="links"><button class="linkbtn" data-act="logout">Log out instead</button></div></div></div>`;
@@ -266,7 +266,7 @@ onAuthStateChanged(auth, (user) => {
   if (!user) { $('#lock').innerHTML = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login'); }
   if (inactiveTooLong()) { signOut(auth); return; }
   touchActivity();
-  root.innerHTML = '<div class="splash">🏋️ Loading your gym…</div>';
+  root.innerHTML = '<div class="splash"><img src="/icons/logo-emblem.png" alt=""><div>Loading your gym…</div></div>';
   // On a page refresh the first read can reach the database before the restored sign-in token is attached
   // ("permission-denied"). Refresh the token and re-subscribe quietly; only show an error if it keeps failing.
   const listen = (q, next, tries = 0) => {
@@ -341,9 +341,9 @@ const NAV = [
   ['batches', 'clock', 'Batches'], ['dues', 'wallet', 'Payments & Dues'], ['reports', 'chart', 'Reports'], ['settings', 'gear', 'Settings'],
 ];
 function renderShell() {
-  const logo = `<span class="logo">${ic('dumbbell')}</span>`;
+  const logo = `<img class="logo-img" src="/icons/logo-emblem.png" alt="">`;
   root.innerHTML = `<div class="shell">
-    <aside class="side"><div class="brand">${logo}<span data-gym></span></div>
+    <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div><div class="side-gym" data-gym></div>
       <nav>${NAV.map(([r, i, l]) => `<button class="navbtn ${['dashboard', 'members', 'reminders'].includes(r) ? 'dup' : ''}" data-act="go" data-to="#/${r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
       <button class="navbtn" data-act="logout">${ic('logout')}<span>Logout</span></button></aside>
     <div class="main">
@@ -463,7 +463,7 @@ function vDashboard() {
       ${stat('bell', 'tone-orange', 'Expiring soon', soon, '#/reminders')}
       ${stat('userplus', 'tone-violet', 'New joinings', joins, '#/members', 'data-act="filt" data-join="1"')}
       ${stat('rupee', 'tone-red', 'Renewal dues', money(dg.rTotal), '#/duelist/renewal', '', `${dg.renewal.length} member${dg.renewal.length === 1 ? '' : 's'}`)}
-      ${stat('wallet', 'tone-orange', 'Unpaid balance', money(dg.uTotal), '#/duelist/unpaid', '', `${dg.unpaid.length} member${dg.unpaid.length === 1 ? '' : 's'} still owe money`)}</div>
+      ${stat('wallet', 'tone-orange', 'Unpaid balance', money(dg.uTotal), '#/duelist/unpaid', '', `${dg.unpaid.length} member${dg.unpaid.length === 1 ? ' still owes' : 's still owe'} money`)}</div>
     <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<a class="kv" href="#/members" data-act="filt" data-st="live" data-plan="${esc(n)}"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length} ›</b></a>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
       <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
@@ -966,7 +966,7 @@ async function restoreData(obj) {
     await b.commit();
   }
   const s = obj.settings || {};
-  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: s.welcomeTemplate ?? S.settings.welcomeTemplate ?? DEFAULT_WELCOME_TEMPLATE, logo: s.logo ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
+  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: s.welcomeTemplate ?? S.settings.welcomeTemplate ?? DEFAULT_WELCOME_TEMPLATE, logo: s.logo ?? '', terms: s.terms ?? S.settings.terms ?? '', rules: s.rules ?? S.settings.rules ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
 }
 async function latestCloudBackup() {
   const ids = (await getDocs(collection(db, 'gyms', uidOf(), 'backups'))).docs.map((d) => d.id).sort();
@@ -989,6 +989,10 @@ function vSettings() {
     <h2>Plans & pricing</h2><form class="card" data-form="plans"><div class="note">Price/duration changes apply only to new joinings and renewals. Past payments never change.</div><div class="err hide" data-err></div>
       <div id="planrows">${s.plans.map(planRow).join('')}</div>
       <div class="actions"><button type="button" class="btn" data-act="addplanrow">＋ Add plan</button><button class="btn primary" type="submit">Save plans</button></div></form>
+    <h2>Invoice terms & gym rules</h2><form class="card" data-form="terms"><div class="note">These print on an extra page after every invoice (PDF, print and WhatsApp). Write one point per line. Leave a box empty to leave it out.</div>
+      <label>Terms & Conditions<textarea name="terms" style="min-height:170px">${esc(s.terms || '')}</textarea></label>
+      <label>Gym Rules<textarea name="rules" style="min-height:170px">${esc(s.rules || '')}</textarea></label>
+      <div class="actions"><button class="btn primary" type="submit">Save terms & rules</button><button type="button" class="btn" data-act="previewterms">Preview invoice</button></div></form>
     <h2>WhatsApp messages</h2><form class="card" data-form="template"><label>Welcome message (new members)<textarea name="welcomeTemplate">${esc(s.welcomeTemplate || DEFAULT_WELCOME_TEMPLATE)}</textarea></label>
       <label>Expiring soon message<textarea name="template">${esc(s.template)}</textarea></label>
       <label>Already expired message<textarea name="expiredTemplate">${esc(s.expiredTemplate || DEFAULT_EXPIRED_TEMPLATE)}</textarea></label>
@@ -1031,6 +1035,7 @@ Object.assign(formHandlers, {
     try { await saveSettings({ plans: rows }); toast('Plans saved'); } catch (e) { showErr(f, errMsg(e)); }
     busy(f, false);
   },
+  async terms(f) { const fd = new FormData(f); await saveSettings({ terms: String(fd.get('terms') || '').trim(), rules: String(fd.get('rules') || '').trim() }); toast('Terms & rules saved'); },
   async template(f) { const fd = new FormData(f); await saveSettings({ template: fd.get('template'), expiredTemplate: fd.get('expiredTemplate'), welcomeTemplate: fd.get('welcomeTemplate') }); toast('Messages saved'); },
   async password(f) {
     const d = Object.fromEntries(new FormData(f));
@@ -1117,7 +1122,12 @@ const actions = {
   collect: (a) => openCollect(a.id),
   invoice: (a) => openInvoice(a.id, a.p),
   async invpdf(a, el) { el.disabled = true; try { const d = invFor(a); download(`Invoice-${d.no}.pdf`, await invoiceBlob(d)); } catch (e) { toast(e.message, 'err'); } el.disabled = false; },
-  invprint: (a) => printInvoice(invFor(a)),
+  async invprint(a) { try { await printInvoice(invFor(a)); } catch (e) { toast(e.message, 'err'); } },
+  async previewterms() {
+    const fd = new FormData($('[data-form=terms]')), t = todayStr();
+    const d = { gym: S.settings.gymName, gymPhone: S.settings.phone, logo: S.settings.logo, terms: fd.get('terms'), rules: fd.get('rules'), no: 'INV-0001', date: t, name: 'Sample Member', phone: '9876543210', plan: '1 Month', start: t, due: addDays(t, 30), price: 1000, discount: 0, paid: 1000, balance: 0, mode: 'UPI' };
+    try { const pages = await renderInvoicePages(d); openModal('Invoice preview', `<div class="inv-prev">${pages.map((c) => `<img src="${c.toDataURL('image/jpeg', 0.85)}" alt="">`).join('')}</div>`, true); } catch (e) { toast(e.message, 'err'); }
+  },
   async invwa(a, el) { el.disabled = true; try { await shareInvoiceWhatsApp(invFor(a), waLink, download); } catch (e) { toast(e.message, 'err'); } el.disabled = false; },
   async movebatch(a) { const m = structuredClone(getMember(a.id)), to = m.batch === 'Morning' ? 'Evening' : 'Morning'; m.logs.push({ at: Date.now(), text: `Batch ${m.batch} → ${to}` }); m.batch = to; await saveMember(m); toast(`Moved to ${to} batch`); },
   async delmember(a) { const m = getMember(a.id); if (confirm(`Delete ${m.name} permanently, including payment history? This cannot be undone.`)) { await deleteDoc(mref(a.id)); toast('Member deleted'); location.hash = '#/members'; } },

@@ -55,3 +55,7 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 - **Staff accounts** (receptionist with limited access) are not included yet; creating extra logins safely needs a small server function. This is the natural next step.
 - WhatsApp opens a pre-filled chat; you tap Send yourself (WhatsApp does not allow silent auto-sending). On phone, "Send on WhatsApp" for invoices shares the PDF directly; on laptop it downloads the PDF and opens the chat so you can attach it.
 - Updating the app: edit files on GitHub; Netlify redeploys. If you do not see a change, close and reopen the app once (cached copy refreshes in the background).
+
+## Branding, invoice terms
+- Logo files are in `icons/` (`logo.png` wide logo, `logo-emblem.png`, and the app icons). Replace them with new images of the same names to change the branding.
+- **Terms & Conditions and Gym Rules** are edited in **Settings → Invoice terms & gym rules**. They print on an extra page of every invoice (PDF, print and WhatsApp). Leave both boxes empty to print the invoice without that page.
