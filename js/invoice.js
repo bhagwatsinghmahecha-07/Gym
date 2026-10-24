@@ -104,130 +104,209 @@ function wrap(x, text, maxW) {
   return out;
 }
 
-function invoicePage(d, brand, custom) {
-  const { c, x } = newPage();
-  band(x, 300);
-  const bw = drawBrand(x, brand, custom, MARGIN, 52, 560, 196);
-  if (custom) {
-    x.fillStyle = '#fff'; x.font = font(800, 40); x.textAlign = 'left';
-    x.fillText(d.gym || '', MARGIN + bw + 28, 140);
-  }
-  x.textAlign = 'right';
-  x.fillStyle = GOLD; x.font = font(800, 70); x.fillText('INVOICE', W - MARGIN, 125);
-  x.fillStyle = '#d6e8fa'; x.font = font(600, 30);
-  x.fillText('No: ' + d.no, W - MARGIN, 182);
-  x.fillText('Date: ' + fmtDate(d.date), W - MARGIN, 226);
-
+// gym name in logo-style lettering: first word light blue, rest yellow
+const LBLUE = '#2fa8ff';
+const BFONT = (px) => `italic 900 ${px}px "Exo 2 Brand","Arial Black",Arial,sans-serif`;
+function brandName(x, name, px, left, base, align) {
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!w.length) return;
+  const parts = [[w[0].toUpperCase(), LBLUE]];
+  if (w.length > 1) parts.push([w.slice(1).join(' ').toUpperCase(), GOLD]);
+  x.font = BFONT(px);
+  const gap = px * 0.28;
+  const tot = parts.reduce((n, p) => n + x.measureText(p[0]).width, 0) + gap * (parts.length - 1);
+  let cx = align === 'right' ? left - tot : left;
   x.textAlign = 'left';
-  x.fillStyle = NAVY; x.font = font(800, 42); x.fillText(d.gym || '', MARGIN, 395);
-  if (d.gymPhone) { x.fillStyle = MUT; x.font = font(400, 28); x.fillText('Ph: ' + d.gymPhone, MARGIN, 440); }
+  for (const [t, col] of parts) {
+    x.save();
+    x.shadowColor = 'rgba(21,144,232,.55)'; x.shadowBlur = px * 0.35;
+    x.fillStyle = col; x.fillText(t, cx, base);
+    x.restore();
+    cx += x.measureText(t).width + gap;
+  }
+}
+function footer(x, text) {
+  x.fillStyle = NAVY; x.fillRect(0, H - 84, W, 84);
+  x.fillStyle = GOLD; x.fillRect(0, H - 90, W, 6);
+  x.fillStyle = '#cfe0f5'; x.font = font(500, 24); x.textAlign = 'center';
+  x.fillText(text, W / 2, H - 36);
+}
+function rrect(x, px, py, w, h, r) {
+  x.beginPath();
+  x.roundRect ? x.roundRect(px, py, w, h, r) : x.rect(px, py, w, h);
+}
+function infoBox(x, px, py, w, h, title, l1, l2, l3) {
+  x.fillStyle = '#fff'; rrect(x, px, py, w, h, 12); x.fill();
+  x.strokeStyle = LINE; x.lineWidth = 2; x.stroke();
+  x.fillStyle = BLUE; rrect(x, px, py, 8, h, 4); x.fill();
+  x.textAlign = 'left';
+  x.fillStyle = BLUE; x.font = font(700, 21); x.fillText(title, px + 34, py + 44);
+  x.fillStyle = INK; x.font = font(700, 36); x.fillText(l1 || '', px + 34, py + 94);
+  x.fillStyle = MUT; x.font = font(400, 28);
+  x.fillText(l2 || '', px + 34, py + 138);
+  if (l3) x.fillText(l3, px + 34, py + 178);
+}
 
-  // billed to / validity
-  x.fillStyle = BLUE; x.font = font(700, 22);
-  x.fillText('BILLED TO', MARGIN, 535);
-  x.textAlign = 'right'; x.fillText('MEMBERSHIP VALIDITY', W - MARGIN, 535);
-  x.textAlign = 'left'; x.fillStyle = INK; x.font = font(700, 38); x.fillText(d.name || '', MARGIN, 586);
-  x.fillStyle = MUT; x.font = font(400, 30); x.fillText(String(d.phone || ''), MARGIN, 632);
-  x.textAlign = 'right'; x.fillStyle = INK; x.font = font(700, 34);
-  x.fillText(`${fmtDate(d.start)} to ${fmtDate(d.due)}`, W - MARGIN, 586);
-  x.fillStyle = MUT; x.font = font(400, 30); x.fillText(String(d.plan || ''), W - MARGIN, 632);
+function invoicePage(d, brand, custom, total) {
+  const { c, x } = newPage();
+  band(x, 270);
+  drawBrand(x, brand, custom, MARGIN, 40, 520, 190);
+  // gym name (logo-style lettering) + contact on the right
+  brandName(x, d.gym, 58, W - MARGIN, 125, 'right');
+  x.textAlign = 'right'; x.fillStyle = '#cfe0f5'; x.font = font(500, 27);
+  let cy = 176;
+  if (d.gymPhone) { x.fillText('Phone: ' + d.gymPhone, W - MARGIN, cy); cy += 40; }
 
-  // table
+  // title + invoice no / date
+  x.textAlign = 'left'; x.fillStyle = NAVY; x.font = font(800, 82); x.fillText('INVOICE', MARGIN, 400);
+  const iw = x.measureText('INVOICE').width;
+  x.fillStyle = GOLD; x.fillText('.', MARGIN + iw + 4, 400);
+  const mw = 400, mh = 120, mx = W - MARGIN - mw, my = 316;
+  x.fillStyle = '#f1f6fc'; rrect(x, mx, my, mw, mh, 14); x.fill();
+  x.textAlign = 'left'; x.fillStyle = MUT; x.font = font(700, 22);
+  x.fillText('INVOICE NO.', mx + 28, my + 44); x.fillText('DATE', mx + 28, my + 90);
+  x.textAlign = 'right'; x.fillStyle = INK; x.font = font(700, 28);
+  x.fillText(String(d.no), mx + mw - 28, my + 44); x.fillText(fmtDate(d.date), mx + mw - 28, my + 90);
+
+  // billed to / membership
+  const bw = (W - MARGIN * 2 - 30) / 2, by = 480, bh = 206;
+  infoBox(x, MARGIN, by, bw, bh, 'BILLED TO', d.name || '', d.phone ? 'Phone: ' + d.phone : '');
+  infoBox(x, MARGIN + bw + 30, by, bw, bh, 'MEMBERSHIP', d.plan || '', 'From: ' + fmtDate(d.start), 'Valid till: ' + fmtDate(d.due));
+
+  // items table
   const tx = MARGIN, tw = W - MARGIN * 2;
-  let y = 720;
-  x.fillStyle = '#e8f3fd'; x.fillRect(tx, y, tw, 72);
-  x.fillStyle = '#055aa3'; x.font = font(700, 24);
-  x.textAlign = 'left'; x.fillText('DESCRIPTION', tx + 26, y + 46);
-  x.textAlign = 'right'; x.fillText('AMOUNT', tx + tw - 26, y + 46);
-  const rows = [
-    [`${d.plan || ''} gym membership`, money(d.price), false, INK],
-    ['Discount', '- ' + money(d.discount), false, INK],
-    [`Amount paid (${d.mode || ''})`, money(d.paid), true, INK],
-    ['Balance due', money(d.balance), true, d.balance > 0 ? '#dc2626' : '#16a34a'],
-  ];
-  y += 72;
-  rows.forEach(([a, b, bold, col], i) => {
-    const rh = 88;
-    if (i === 2) { x.fillStyle = '#fff8dc'; x.fillRect(tx, y, tw, rh); }
-    x.fillStyle = col; x.font = font(bold ? 700 : 400, 32);
-    x.textAlign = 'left'; x.fillText(a, tx + 26, y + 57);
-    x.textAlign = 'right'; x.fillText(b, tx + tw - 26, y + 57);
+  let y = 745;
+  x.fillStyle = NAVY; x.fillRect(tx, y, tw, 74);
+  x.fillStyle = GOLD; x.font = font(700, 24);
+  x.textAlign = 'left'; x.fillText('DESCRIPTION', tx + 28, y + 48);
+  x.textAlign = 'right'; x.fillText('AMOUNT', tx + tw - 28, y + 48);
+  y += 74;
+  const rows = [[`${d.plan || ''} gym membership`, money(d.price)]];
+  if (d.discount > 0) rows.push(['Discount', '- ' + money(d.discount)]);
+  rows.forEach(([a, b2], i) => {
+    const rh = 86;
+    if (i % 2) { x.fillStyle = '#f7fafd'; x.fillRect(tx, y, tw, rh); }
+    x.fillStyle = INK; x.font = font(400, 31);
+    x.textAlign = 'left'; x.fillText(a, tx + 28, y + 55);
+    x.textAlign = 'right'; x.fillText(b2, tx + tw - 28, y + 55);
     x.fillStyle = LINE; x.fillRect(tx, y + rh - 2, tw, 2);
     y += rh;
   });
 
+  // summary
+  const sw = 520, sx = W - MARGIN - sw;
+  y += 30;
+  const net = (+d.price || 0) - (+d.discount || 0);
+  x.textAlign = 'left'; x.fillStyle = MUT; x.font = font(600, 24);
+  x.fillText('PAYMENT MODE', MARGIN, y + 36);
+  x.fillStyle = INK; x.font = font(700, 32); x.fillText(String(d.mode || '-'), MARGIN, y + 82);
+  const line = (a, b2) => {
+    x.textAlign = 'left'; x.fillStyle = INK; x.font = font(500, 30); x.fillText(a, sx + 24, y + 40);
+    x.textAlign = 'right'; x.fillText(b2, sx + sw - 24, y + 40);
+    y += 64;
+  };
+  line('Total', money(net));
+  line('Amount paid', money(d.paid));
+  x.fillStyle = NAVY; rrect(x, sx, y, sw, 92, 12); x.fill();
+  x.textAlign = 'left'; x.fillStyle = '#fff'; x.font = font(700, 32); x.fillText('Balance due', sx + 24, y + 59);
+  x.textAlign = 'right'; x.fillStyle = d.balance > 0 ? '#ff7a7a' : '#4ade80'; x.font = font(800, 38);
+  x.fillText(money(d.balance), sx + sw - 24, y + 61);
+  y += 92;
+
   x.textAlign = 'center';
-  x.fillStyle = NAVY; x.font = font(700, 34); x.fillText(`Thank you for training with ${d.gym || 'us'}!`, W / 2, y + 120);
+  x.fillStyle = NAVY; x.font = font(700, 34); x.fillText(`Thank you for training with ${d.gym || 'us'}!`, W / 2, y + 150);
   if ((d.terms || '').trim() || (d.rules || '').trim()) {
     x.fillStyle = MUT; x.font = font(400, 27);
-    x.fillText('Please read the Terms & Conditions and Rules on the next page.', W / 2, y + 175);
+    x.fillText('Please read the Terms & Conditions and Rules on the next page.', W / 2, y + 204);
   }
-  strip(x);
+  footer(x, `${d.gym || ''}  •  Invoice ${d.no}  •  Page 1 of ${total}`);
   return c;
 }
 
 // Terms / rules pages (may run over several pages)
+function icon(x, kind, cx, cy) {
+  x.save();
+  x.fillStyle = GOLD; x.beginPath(); x.arc(cx, cy, 27, 0, Math.PI * 2); x.fill();
+  x.strokeStyle = NAVY; x.lineWidth = 4; x.lineCap = 'round'; x.lineJoin = 'round';
+  if (kind === 'doc') {
+    x.strokeRect(cx - 10, cy - 14, 20, 28);
+    x.beginPath(); x.moveTo(cx - 5, cy - 5); x.lineTo(cx + 5, cy - 5); x.moveTo(cx - 5, cy + 2); x.lineTo(cx + 5, cy + 2); x.moveTo(cx - 5, cy + 9); x.lineTo(cx + 1, cy + 9); x.stroke();
+  } else {
+    x.beginPath(); x.moveTo(cx - 12, cy); x.lineTo(cx - 3, cy + 10); x.lineTo(cx + 13, cy - 10); x.stroke();
+  }
+  x.restore();
+}
 function termsPages(d, brand, custom) {
   const pages = [];
   let cur = null, y = 0;
+  const BOTTOM = H - 150;
   const startPage = () => {
     cur = newPage();
     const { x } = cur;
-    band(x, 170);
-    drawBrand(x, brand, custom, MARGIN, 24, 330, 120);
+    if (brand) { // soft watermark so the page never looks empty
+      x.save(); x.globalAlpha = 0.06;
+      const dm = contain(brand, 1000, 640);
+      x.drawImage(brand, (W - dm.w) / 2, (H - dm.h) / 2 + 80, dm.w, dm.h);
+      x.restore();
+    }
+    band(x, 230);
+    drawBrand(x, brand, custom, MARGIN, 34, 420, 160);
     x.textAlign = 'right';
-    x.fillStyle = GOLD; x.font = font(800, 50); x.fillText('Terms & Rules', W - MARGIN, 90);
-    x.fillStyle = '#d6e8fa'; x.font = font(600, 26); x.fillText(`Invoice ${d.no}  ·  ${d.gym || ''}`, W - MARGIN, 134);
-    y = 270;
+    x.fillStyle = GOLD; x.font = font(800, 56); x.fillText('TERMS & RULES', W - MARGIN, 108);
+    x.fillStyle = '#d6e8fa'; x.font = font(500, 26); x.fillText(`Please read carefully  •  Invoice ${d.no}`, W - MARGIN, 160);
+    y = 300;
     pages.push(cur);
   };
-  const BOTTOM = H - 120;
-  const section = (title, text) => {
+  const section = (title, text, kind) => {
     const t = String(text || '').trim();
     if (!t) return;
-    if (!cur || y > BOTTOM - 160) startPage();
+    if (!cur || y > BOTTOM - 260) startPage();
     let { x } = cur;
-    x.textAlign = 'left'; x.fillStyle = NAVY; x.font = font(800, 44); x.fillText(title, MARGIN, y);
-    x.fillStyle = GOLD; x.fillRect(MARGIN, y + 16, 120, 8);
-    y += 84;
-    const FS = 30, LH = 46;
+    const heading = () => {
+      ({ x } = cur);
+      x.fillStyle = NAVY; rrect(x, MARGIN, y, W - MARGIN * 2, 88, 14); x.fill();
+      x.fillStyle = GOLD; x.fillRect(MARGIN, y + 20, 8, 48);
+      icon(x, kind, MARGIN + 58, y + 44);
+      x.textAlign = 'left'; x.fillStyle = '#fff'; x.font = font(800, 36); x.fillText(title.toUpperCase(), MARGIN + 110, y + 57);
+      y += 88 + 22;
+    };
+    heading();
+    const FS = 30, LH = 44, TX = MARGIN + 96, TW = W - MARGIN * 2 - 96 - 28;
+    let n = 0;
     for (const raw of t.split('\n')) {
       const line = raw.trim();
-      if (!line) { y += 18; continue; }
+      if (!line) continue;
       const m = line.match(/^(\d+[.)]|[-•*])\s+(.*)$/);
-      const marker = m ? (/^[-*]$/.test(m[1]) ? '•' : m[1]) : '•';
       const body = m ? m[2] : line;
+      n++;
       ({ x } = cur);
-      x.font = font(700, FS);
-      const mw = Math.max(x.measureText(marker).width + 18, 44);
       x.font = font(400, FS);
-      const lines = wrap(x, body, W - MARGIN * 2 - mw);
-      for (let i = 0; i < lines.length; i++) {
-        if (y > BOTTOM) { startPage(); ({ x } = cur); }
-        x.textAlign = 'left';
-        if (i === 0) { x.fillStyle = BLUE; x.font = font(700, FS); x.fillText(marker, MARGIN, y); }
-        x.fillStyle = INK; x.font = font(400, FS); x.fillText(lines[i], MARGIN + mw, y);
-        y += LH;
-      }
-      y += 8;
+      const lines = wrap(x, body, TW);
+      const rh = lines.length * LH + 34;
+      if (y + rh > BOTTOM) { startPage(); heading(); ({ x } = cur); }
+      x.fillStyle = n % 2 ? '#f1f6fc' : '#ffffff';
+      rrect(x, MARGIN, y, W - MARGIN * 2, rh, 12); x.fill();
+      x.strokeStyle = LINE; x.lineWidth = 2; x.stroke();
+      // number badge
+      x.fillStyle = BLUE; x.beginPath(); x.arc(MARGIN + 50, y + rh / 2, 25, 0, Math.PI * 2); x.fill();
+      x.fillStyle = '#fff'; x.font = font(800, 26); x.textAlign = 'center'; x.fillText(String(n), MARGIN + 50, y + rh / 2 + 9);
+      x.textAlign = 'left'; x.fillStyle = INK; x.font = font(400, FS);
+      lines.forEach((l, i) => x.fillText(l, TX, y + 17 + LH * (i + 1) - 11));
+      y += rh + 12;
     }
-    y += 40;
+    y += 34;
   };
-  section('Terms & Conditions', d.terms);
-  section('Gym Rules', d.rules);
-  pages.forEach(({ x }, i) => {
-    x.textAlign = 'center'; x.fillStyle = MUT; x.font = font(400, 22);
-    x.fillText(`${d.gym || ''}  ·  Invoice ${d.no}  ·  Page ${i + 2} of ${pages.length + 1}`, W / 2, H - 62);
-    strip(x);
-  });
+  section('Terms & Conditions', d.terms, 'doc');
+  section('Gym Rules', d.rules, 'check');
+  pages.forEach(({ x }, i) => footer(x, `${d.gym || ''}  •  Invoice ${d.no}  •  Page ${i + 2} of ${pages.length + 1}`));
   return pages.map((p) => p.c);
 }
 
 export async function renderInvoicePages(d) {
-  const [brand, custom] = await Promise.all([loadImg('/icons/logo.png'), loadImg(d.logo)]);
-  const pages = [invoicePage(d, brand, custom)];
-  if ((d.terms || '').trim() || (d.rules || '').trim()) pages.push(...termsPages(d, brand, custom));
-  return pages;
+  const [brand, custom] = await Promise.all([loadImg('/icons/logo.png'), loadImg(d.logo), document.fonts.load('italic 900 40px "Exo 2 Brand"').catch(() => {})]);
+  const hasTerms = (d.terms || '').trim() || (d.rules || '').trim();
+  const rest = hasTerms ? termsPages(d, brand, custom) : [];
+  return [invoicePage(d, brand, custom, 1 + rest.length), ...rest];
 }
 
 // ---------------------------------------------------------------- PDF / print / share

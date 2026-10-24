@@ -245,3 +245,13 @@ tbody tr.clickable:hover,a.kv:hover{background:#e8f3fd}
 .pagehead h1{color:#00102e}
 .inv-prev img{display:block;width:100%;border:1px solid var(--line);border-radius:8px;margin-bottom:12px;background:#fff}
 .side .brand{border-bottom:0;margin-bottom:0;padding:6px 4px 0}
+
+/* ---- brand name lettering (like the logo): FITNESS light blue, CLUB yellow ---- */
+@font-face{font-family:"Exo 2 Brand";font-weight:900;font-style:italic;font-display:swap;src:url(/fonts/exo-2-900-italic.woff2) format("woff2")}
+.bname{font-family:"Exo 2 Brand","Arial Black",Arial,sans-serif;font-weight:900;font-style:italic;letter-spacing:.5px;text-transform:uppercase}
+.bn-a{color:#2fa8ff}.bn-b{color:#fab706}
+.bname .bn-a,.bname .bn-b{text-shadow:0 0 10px rgba(21,144,232,.4),0 2px 0 rgba(0,0,0,.35)}
+.tb-brand b.bname{font-size:20px}
+.side-gym.bname{font-size:17px;color:inherit;letter-spacing:.5px}
+.hero-t.bname{font-size:28px;letter-spacing:.5px}
+.auth-card .brand.bname{font-size:30px;letter-spacing:.5px}

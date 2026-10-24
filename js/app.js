@@ -13,7 +13,7 @@ import {
 import { firebaseConfig } from '../firebase-config.js';
 import {
   $, $$, esc, money, uid, todayStr, addDays, diffDays, fmtDate, calcPeriod, curRenewal, memberInfo, SOON_DAYS, daysBadge, daysText,
-  statusBadge, normPhone, validPhone, waLink, fmtMsg, csv, download, compressImage,
+  brandHtml, statusBadge, normPhone, validPhone, waLink, fmtMsg, csv, download, compressImage,
 } from './util.js';
 import { invoiceData, printInvoice, invoiceBlob, shareInvoiceWhatsApp, renderInvoicePages } from './invoice.js';
 
@@ -106,7 +106,7 @@ function authScreen(mode = 'login', msg = '') {
       <div class="links"><button class="linkbtn" data-act="auth" data-to="login">← Back to login</button></div>`,
   };
   S.shell = false;
-  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand">Gym Manager</div>${forms[mode]}</div></div>`;
+  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand bname">${brandHtml('Fitness Club')}</div>${forms[mode]}</div></div>`;
 }
 
 const errMsg = (e) =>
@@ -237,7 +237,7 @@ document.addEventListener('visibilitychange', () => {
 });
 function showLock() {
   if (!localStorage.getItem('gm_pin') || sessionStorage.getItem('gm_unlocked') || !S.user) return ($('#lock').innerHTML = '');
-  $('#lock').innerHTML = `<div class="lockov"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand">🔒 Enter PIN</div><p>Enter your 4-digit app PIN</p>
+  $('#lock').innerHTML = `<div class="lockov"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand bname">${brandHtml('Fitness Club')}</div><h3 style="margin:0 0 4px">🔒 Enter PIN</h3><p>Enter your 4-digit app PIN</p>
     <form data-form="unlock"><input name="pin" type="password" inputmode="numeric" maxlength="4" pattern="\\d{4}" autocomplete="off" required autofocus>
     <div class="err hide" data-err style="margin-top:12px"></div><button class="btn primary block" style="margin-top:12px">Unlock</button></form>
     <div class="links"><button class="linkbtn" data-act="logout">Log out instead</button></div></div></div>`;
@@ -343,11 +343,11 @@ const NAV = [
 function renderShell() {
   const logo = `<img class="logo-img" src="/icons/logo-emblem.png" alt="">`;
   root.innerHTML = `<div class="shell">
-    <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div><div class="side-gym" data-gym></div>
+    <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div><div class="side-gym bname" data-gym></div>
       <nav>${NAV.map(([r, i, l]) => `<button class="navbtn ${['dashboard', 'members', 'reminders'].includes(r) ? 'dup' : ''}" data-act="go" data-to="#/${r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
       <button class="navbtn" data-act="logout">${ic('logout')}<span>Logout</span></button></aside>
     <div class="main">
-      <header class="topbar"><div class="tb-brand">${logo}<b data-gym></b></div><button class="iconbtn" data-act="logout" aria-label="Logout">${ic('logout')}</button></header>
+      <header class="topbar"><div class="tb-brand">${logo}<b class="bname" data-gym></b></div><button class="iconbtn" data-act="logout" aria-label="Logout">${ic('logout')}</button></header>
       <nav class="toptabs" aria-label="Main">
         <button class="ttab" data-act="go" data-to="#/dashboard" data-r="dashboard">${ic('home')}<span>Home</span></button>
         <button class="ttab" data-act="go" data-to="#/members" data-r="members">${ic('users')}<span>Members</span></button>
@@ -359,7 +359,7 @@ function renderShell() {
   S.shell = true;
 }
 function updateChrome() {
-  $$('[data-gym]').forEach((e) => (e.textContent = S.settings.gymName));
+  $$('[data-gym]').forEach((e) => (e.innerHTML = brandHtml(S.settings.gymName)));
   const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= SOON_DAYS; }).length + S.members.filter(isWelcome).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
   $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard') || (S.route === 'edit' && b.dataset.r === 'members')));
@@ -453,7 +453,7 @@ function vDashboard() {
   const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   const stat = (icon, tone, label, val, href, attrs = '', sub = '') => `<${href ? `a href="${href}" ${attrs}` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b>${sub ? `<div class="l">${sub}</div>` : ''}</div></${href ? 'a' : 'div'}>`;
   view(`<section class="hero"><div><div class="hero-sub">${greet}${S.settings.ownerName ? ', ' + esc(S.settings.ownerName.split(' ')[0]) : ''} 👋</div>
-      <div class="hero-t">${esc(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
+      <div class="hero-t bname">${brandHtml(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
       <a class="hero-n" href="#/reports"><div class="l">This month's revenue ›</div><b>${money(revenue)}</b></a></section>
     <div class="quick"><a class="btn" href="#/reminders">${ic('bell')} Reminders</a><a class="btn" href="#/dues">${ic('wallet')} Collect Payment</a></div>
     <div class="stats">

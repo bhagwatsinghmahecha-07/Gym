@@ -127,3 +127,10 @@ export async function compressImage(src, max = 320, q = 0.72) {
   x.drawImage(bmp, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', q);
 }
+
+// Gym name styled like the logo: first word light blue, the rest yellow (returns safe HTML)
+export const brandHtml = (name) => {
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!w.length) return '';
+  return `<span class="bn-a">${esc(w[0])}</span>` + (w.length > 1 ? ` <span class="bn-b">${esc(w.slice(1).join(' '))}</span>` : '');
+};

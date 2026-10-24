@@ -59,3 +59,6 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 ## Branding, invoice terms
 - Logo files are in `icons/` (`logo.png` wide logo, `logo-emblem.png`, and the app icons). Replace them with new images of the same names to change the branding.
 - **Terms & Conditions and Gym Rules** are edited in **Settings → Invoice terms & gym rules**. They print on an extra page of every invoice (PDF, print and WhatsApp). Leave both boxes empty to print the invoice without that page.
+
+## Brand lettering
+The gym name is shown in logo-style lettering (first word light blue, the rest yellow) using the bundled Exo 2 font (SIL Open Font License) in /fonts.
