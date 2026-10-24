@@ -255,3 +255,12 @@ tbody tr.clickable:hover,a.kv:hover{background:#e8f3fd}
 .side-gym.bname{font-size:17px;color:inherit;letter-spacing:.5px}
 .hero-t.bname{font-size:28px;letter-spacing:.5px}
 .auth-card .brand.bname{font-size:30px;letter-spacing:.5px}
+
+/* ---- shiny logo-style lettering ---- */
+.bname{filter:drop-shadow(0 2px 0 rgba(0,35,85,.7)) drop-shadow(0 0 9px rgba(20,170,255,.45))}
+.bname .bn-a,.bname .bn-b{text-shadow:none;color:transparent;-webkit-background-clip:text;background-clip:text}
+.bname .bn-a{background-image:linear-gradient(180deg,#d4f8ff 0%,#3fe6f7 24%,#13bff3 52%,#0a78d8 100%)}
+.bname .bn-b{background-image:linear-gradient(180deg,#fff6a8 0%,#f7e642 24%,#f8c910 54%,#d98d00 100%)}
+@supports not (background-clip:text){.bname .bn-a{color:#2fd0f6}.bname .bn-b{color:#f8c910}}
+.side .brand{padding:10px 0 16px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:12px}
+.side-logo{width:114%;max-width:none;margin:0 -7%}

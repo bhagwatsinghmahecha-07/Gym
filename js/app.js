@@ -343,7 +343,7 @@ const NAV = [
 function renderShell() {
   const logo = `<img class="logo-img" src="/icons/logo-emblem.png" alt="">`;
   root.innerHTML = `<div class="shell">
-    <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div><div class="side-gym bname" data-gym></div>
+    <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div>
       <nav>${NAV.map(([r, i, l]) => `<button class="navbtn ${['dashboard', 'members', 'reminders'].includes(r) ? 'dup' : ''}" data-act="go" data-to="#/${r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
       <button class="navbtn" data-act="logout">${ic('logout')}<span>Logout</span></button></aside>
     <div class="main">

@@ -118,11 +118,16 @@ function brandName(x, name, px, left, base, align) {
   let cx = align === 'right' ? left - tot : left;
   x.textAlign = 'left';
   for (const [t, col] of parts) {
+    const tw = x.measureText(t).width;
+    const g = x.createLinearGradient(0, base - px * 0.78, 0, base + px * 0.06);
+    if (col === GOLD) { g.addColorStop(0, '#fff6a8'); g.addColorStop(0.24, '#f7e642'); g.addColorStop(0.54, '#f8c910'); g.addColorStop(1, '#d98d00'); }
+    else { g.addColorStop(0, '#d4f8ff'); g.addColorStop(0.24, '#3fe6f7'); g.addColorStop(0.52, '#13bff3'); g.addColorStop(1, '#0a78d8'); }
     x.save();
-    x.shadowColor = 'rgba(21,144,232,.55)'; x.shadowBlur = px * 0.35;
-    x.fillStyle = col; x.fillText(t, cx, base);
+    x.shadowColor = 'rgba(20,170,255,.6)'; x.shadowBlur = px * 0.4;
+    x.fillStyle = 'rgba(0,35,85,.85)'; x.fillText(t, cx, base + Math.max(2, px * 0.05));
     x.restore();
-    cx += x.measureText(t).width + gap;
+    x.fillStyle = g; x.fillText(t, cx, base);
+    cx += tw + gap;
   }
 }
 function footer(x, text) {

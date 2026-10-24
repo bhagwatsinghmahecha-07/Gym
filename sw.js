@@ -1,6 +1,6 @@
 // Service worker: makes the app installable and fast/reliable on slow internet.
 // App files + Firebase/jsPDF library files are cached; live data comes from Firestore's own offline cache.
-const CACHE = 'gym-manager-v12';
+const CACHE = 'gym-manager-v13';
 const SHELL = ['/', '/index.html', '/css/styles.css', '/js/app.js', '/js/util.js', '/js/invoice.js', '/vendor/jspdf.umd.min.js', '/firebase-config.js', '/manifest.webmanifest', '/fonts/exo-2-900-italic.woff2', '/icons/logo.png', '/icons/logo-emblem.png', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
