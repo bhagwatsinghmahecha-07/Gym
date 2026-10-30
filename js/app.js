@@ -8,7 +8,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, deleteDoc, collection,
-  onSnapshot, getDocs, writeBatch,
+  onSnapshot, getDocs, writeBatch, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import {
@@ -47,17 +47,29 @@ const DEFAULT_WELCOME_TEMPLATE =
 const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', terms: '', rules: '', invSeq: 0 };
 
 const S = {
-  user: null, settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
+  user: null, role: 'owner', ownerId: '', staff: null, staffList: [], settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
   route: '', arg: '', sort: { k: 'due', d: 1 }, q: '', fPlan: '', fBatch: '', fStatus: '', fJoin: false, mTab: 'active', batchTab: 'Morning',
   rmonth: todayStr().slice(0, 7), photo: '', rTab: 'soon',
 };
 let unsubs = [];
 const isTouch = matchMedia('(pointer:coarse)').matches;
-const uidOf = () => S.user.uid;
+const uidOf = () => S.ownerId || S.user.uid;
 const mref = (id) => doc(db, 'gyms', uidOf(), 'members', id);
 const sref = () => doc(db, 'gyms', uidOf(), 'settings', 'main');
 const saveSettings = (patch) => setDoc(sref(), patch, { merge: true });
-const saveMember = (m) => setDoc(mref(m.id), JSON.parse(JSON.stringify(m)));
+const cleanMember = (m) => { const o = JSON.parse(JSON.stringify(m)); delete o.createdMs; return o; };
+// merge keeps server-only fields (like the trainer edit-window timestamp) in place
+const saveMember = (m) => setDoc(mref(m.id), cleanMember(m), { merge: true });
+const saveNewMember = (m) => setDoc(mref(m.id), isTrainer() ? { ...cleanMember(m), createdAtTs: serverTimestamp() } : cleanMember(m));
+// ---- roles: the owner can do everything; a trainer has a limited set of actions (also enforced by firestore.rules)
+const isTrainer = () => S.role === 'trainer';
+const actorName = () => (isTrainer() ? (S.staff?.name || 'Trainer') : 'Owner');
+const byTag = () => ({ by: actorName(), byId: S.user?.uid || '' });
+const logEntry = (text) => ({ at: Date.now(), text, ...byTag() });
+const canSeeHealth = () => !isTrainer() || !!S.staff?.canSeeHealth;
+const EDIT_WINDOW = 10 * 60e3;
+const editLeft = (m) => (m.addedByUid === S.user?.uid && m.createdMs ? m.createdMs + EDIT_WINDOW - Date.now() : 0);
+const canEdit = (m) => !isTrainer() || editLeft(m) > 0;
 const getMember = (id) => S.members.find((m) => m.id === id);
 const planOf = (id) => S.settings.plans.find((p) => p.id === id);
 
@@ -84,7 +96,14 @@ function authScreen(mode = 'login', msg = '') {
         <button class="btn primary block" type="submit">Login</button>
       </form>
       <div class="links"><button class="linkbtn" data-act="auth" data-to="forgot">Forgot Password?</button><button class="linkbtn" data-act="auth" data-to="link">Login with OTP link</button></div>
+      <div class="links tr-link"><span class="mut">Are you a trainer?</span><button class="linkbtn" data-act="auth" data-to="trainer">Create your trainer login</button></div>
 `,
+    trainer: `<p>Trainer sign-up</p><div class="note">Use the email address your gym owner added for you. We will send a verification link to it.</div>
+      <form data-form="tsignup"><label>Your email<input name="email" type="email" required autocomplete="email" placeholder="you@gmail.com"></label>
+        <div class="grid2">${pwField('pw', 'Create password (min 8)', 'new-password')}${pwField('pw2', 'Confirm password', 'new-password')}</div>
+        <div class="err hide" data-err></div>
+        <button class="btn primary block" type="submit">Create trainer login</button></form>
+      <div class="links"><button class="linkbtn" data-act="auth" data-to="login">← Back to login</button></div>`,
     signup: `<p>Create your owner account</p>
       <form data-form="signup">
         <div class="grid2"><label>Your name<input name="oname" required autocomplete="name"></label><label>Gym name<input name="gym" required></label></div>
@@ -202,6 +221,28 @@ const formHandlers = {
     showOk(f, 'If this account exists, a password reset link has been sent to its registered email. Open it, set a new password (min 8 characters), then log in.');
     busy(f, false);
   },
+  async tsignup(f) {
+    const d = Object.fromEntries(new FormData(f)), email = d.email.trim();
+    if (d.pw.length < 8) return showErr(f, 'Password must be at least 8 characters.');
+    if (d.pw !== d.pw2) return showErr(f, 'Passwords do not match.');
+    busy(f, true); showErr(f, '');
+    S.signingUp = true;
+    const done = () => { busy(f, false); setTimeout(() => { S.signingUp = false; }, 900); };
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, d.pw);
+      let invited = false;
+      try { invited = (await getDoc(doc(db, 'staffIndex', email.toLowerCase()))).exists(); } catch { invited = false; }
+      if (!invited) {
+        await cred.user.delete().catch(() => signOut(auth));
+        done();
+        return showErr(f, 'This email has not been invited yet. Please ask the gym owner to add your email on the Staff page, then try again.');
+      }
+      sendEmailVerification(cred.user).catch(() => {});
+      localStorage.setItem('gm_remember', '1');
+      done();
+      S.user = cred.user; enter(cred.user);
+    } catch (e) { done(); showErr(f, errMsg(e)); }
+  },
   async link(f) {
     const d = Object.fromEntries(new FormData(f));
     const wait = canSend('link');
@@ -259,14 +300,20 @@ if (isSignInWithEmailLink(auth, location.href)) {
   })();
 }
 
-onAuthStateChanged(auth, (user) => {
-  unsubs.forEach((u) => u()); unsubs = []; bootDone = false;
-  S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
-  S.user = user;
-  if (!user) { $('#lock').innerHTML = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login'); }
-  if (inactiveTooLong()) { signOut(auth); return; }
-  touchActivity();
-  root.innerHTML = '<div class="splash"><img src="/icons/logo-emblem.png" alt=""><div>Loading your gym…</div></div>';
+// Shown to a trainer who still has to verify their email, or whose access was switched off
+function noticeScreen(title, html) {
+  S.shell = false;
+  root.innerHTML = `<div class="auth"><div class="auth-card"><div class="auth-banner"><img src="/icons/logo.png" alt="Fitness Club"></div><div class="brand bname">${brandHtml('Fitness Club')}</div><h3>${title}</h3>${html}</div></div>`;
+}
+const verifyScreen = () => noticeScreen('Verify your email', `<p>We sent a verification link to <b>${esc(S.user.email)}</b>. Open it, then come back here and tap the button.</p>
+  <button class="btn primary block" data-act="verified">I have verified my email</button>
+  <div class="links"><button class="linkbtn" data-act="resendverify">Resend email</button><button class="linkbtn" data-act="logout">Log out</button></div>`);
+function noAccessScreen() {
+  unsubs.forEach((u) => u()); unsubs = []; S.ready = { s: false, m: false };
+  noticeScreen('No access', `<p>Your trainer access is switched off or was removed. Please contact the gym owner.</p><div class="links"><button class="linkbtn" data-act="logout">← Log out</button></div>`);
+}
+
+function startSession(user) {
   // On a page refresh the first read can reach the database before the restored sign-in token is attached
   // ("permission-denied"). Refresh the token and re-subscribe quietly; only show an error if it keeps failing.
   const listen = (q, next, tries = 0) => {
@@ -276,15 +323,61 @@ onAuthStateChanged(auth, (user) => {
         setTimeout(() => { if (S.user && S.user.uid === user.uid) listen(q, next, tries + 1); }, 700 * (tries + 1));
         return;
       }
+      if (isTrainer() && e.code === 'permission-denied') return noAccessScreen();
       toast(errMsg(e), 'err');
     }));
   };
   listen(sref(), (snap) => { S.settings = { ...DEF_SETTINGS, ...(snap.data() || {}) }; S.ready.s = true; afterData(); });
-  listen(collection(db, 'gyms', user.uid, 'members'), (snap) => {
-    S.members = snap.docs.map((d) => { const m = { id: d.id, ...d.data() }; m.renewals ||= []; m.payments ||= []; m.logs ||= []; return m; }).filter((m) => m.renewals.length);
+  listen(collection(db, 'gyms', uidOf(), 'members'), (snap) => {
+    S.members = snap.docs.map((d) => {
+      const m = { id: d.id, ...d.data({ serverTimestamps: 'estimate' }) };
+      if (m.createdAtTs?.toMillis) m.createdMs = m.createdAtTs.toMillis();
+      delete m.createdAtTs;
+      m.renewals ||= []; m.payments ||= []; m.logs ||= [];
+      return m;
+    }).filter((m) => m.renewals.length);
     S.ready.m = true; afterData();
   });
+  if (!isTrainer()) listen(collection(db, 'gyms', uidOf(), 'staff'), (snap) => { S.staffList = snap.docs.map((d) => ({ key: d.id, ...d.data() })); if (S.route === 'staff') vStaff(); });
   showLock();
+}
+
+// Who is this? A trainer's email is listed in "staffIndex" (written by the owner when inviting them); everyone else is the owner.
+async function enter(user) {
+  S.role = 'owner'; S.ownerId = ''; S.staff = null;
+  root.innerHTML = '<div class="splash"><img src="/icons/logo-emblem.png" alt=""><div>Loading your gym…</div></div>';
+  const key = (user.email || '').toLowerCase(), ck = 'gm_role_' + user.uid;
+  let idx = null, known = false;
+  try { const sn = await getDoc(doc(db, 'staffIndex', key)); known = true; if (sn.exists()) idx = sn.data(); } catch { /* offline: use what this device remembered */ }
+  if (S.user !== user) return;
+  if (known) localStorage.setItem(ck, idx ? JSON.stringify({ o: idx.ownerId }) : 'owner');
+  else { const c = localStorage.getItem(ck); if (c && c !== 'owner') { try { idx = { ownerId: JSON.parse(c).o }; } catch { /* ignore */ } } }
+  if (idx) {
+    S.role = 'trainer'; S.ownerId = idx.ownerId;
+    if (!user.emailVerified) return verifyScreen();
+    try {
+      const sd = await getDoc(doc(db, 'gyms', idx.ownerId, 'staff', key));
+      if (S.user !== user) return;
+      if (!sd.exists() || sd.data().active === false) return noAccessScreen();
+      S.staff = sd.data();
+    } catch (e) {
+      if (e.code === 'permission-denied') return noAccessScreen();
+      S.staff = { name: 'Trainer' }; // offline: carry on with what is cached
+    }
+  }
+  startSession(user);
+}
+
+onAuthStateChanged(auth, (user) => {
+  unsubs.forEach((u) => u()); unsubs = []; bootDone = false;
+  S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
+  S.role = 'owner'; S.ownerId = ''; S.staff = null; S.staffList = [];
+  S.user = user;
+  if (S.signingUp) return; // trainer sign-up is checking the invitation first
+  if (!user) { $('#lock').innerHTML = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login'); }
+  if (inactiveTooLong()) { signOut(auth); return; }
+  touchActivity();
+  enter(user);
 });
 
 let bootDone = false;
@@ -295,6 +388,7 @@ function afterData() {
 }
 async function boot() {
   bootDone = true;
+  if (isTrainer()) { setDoc(doc(db, 'gyms', uidOf(), 'staff', (S.user.email || '').toLowerCase()), { lastSeenAt: Date.now(), uid: S.user.uid }, { merge: true }).catch(() => {}); return; }
   try {
     // keep phone lookup in sync if the login email was changed
     const e = S.user.email;
@@ -338,20 +432,23 @@ const ICONS = {
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const NAV = [
   ['dashboard', 'home', 'Dashboard'], ['members', 'users', 'Members'], ['reminders', 'bell', 'Reminders'],
-  ['batches', 'clock', 'Batches'], ['dues', 'wallet', 'Payments & Dues'], ['reports', 'chart', 'Reports'], ['settings', 'gear', 'Settings'],
+  ['batches', 'clock', 'Batches'], ['dues', 'wallet', 'Payments & Dues'], ['reports', 'chart', 'Reports'], ['staff', 'userplus', 'Trainers'], ['settings', 'gear', 'Settings'],
 ];
+const TNAV = [['dashboard', 'home', 'Dashboard', '#/dashboard'], ['members', 'users', 'Members', '#/members'], ['duelist', 'wallet', 'Pending Dues', '#/duelist/renewal']];
+const TRAINER_ROUTES = ['dashboard', 'members', 'member', 'add', 'edit', 'duelist'];
 function renderShell() {
   const logo = `<img class="logo-img" src="/icons/logo-emblem.png" alt="">`;
   root.innerHTML = `<div class="shell">
     <aside class="side"><div class="brand"><img class="side-logo" src="/icons/logo.png" alt="Fitness Club"></div>
-      <nav>${NAV.map(([r, i, l]) => `<button class="navbtn ${['dashboard', 'members', 'reminders'].includes(r) ? 'dup' : ''}" data-act="go" data-to="#/${r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
+      <nav>${(isTrainer() ? TNAV : NAV).map(([r, i, l, h]) => `<button class="navbtn ${(isTrainer() ? ['dashboard', 'members', 'duelist'] : ['dashboard', 'members', 'reminders']).includes(r) ? 'dup' : ''}" data-act="go" data-to="${h || '#/' + r}" data-r="${r}">${ic(i)}<span>${l}</span><i class="pip hide" data-pip="${r}"></i></button>`).join('')}</nav>
+      ${isTrainer() ? `<div class="whoami"><b>${esc(actorName())}</b><span>Trainer</span></div>` : ''}
       <button class="navbtn" data-act="logout">${ic('logout')}<span>Logout</span></button></aside>
     <div class="main">
       <header class="topbar"><div class="tb-brand">${logo}<b class="bname" data-gym></b></div><button class="iconbtn" data-act="logout" aria-label="Logout">${ic('logout')}</button></header>
       <nav class="toptabs" aria-label="Main">
         <button class="ttab" data-act="go" data-to="#/dashboard" data-r="dashboard">${ic('home')}<span>Home</span></button>
         <button class="ttab" data-act="go" data-to="#/members" data-r="members">${ic('users')}<span>Members</span></button>
-        <button class="ttab" data-act="go" data-to="#/reminders" data-r="reminders">${ic('bell')}<span>Reminders</span><i class="pip hide" data-pip="reminders"></i></button>
+        ${isTrainer() ? `<button class="ttab" data-act="go" data-to="#/duelist/renewal" data-r="duelist">${ic('wallet')}<span>Dues</span></button>` : `<button class="ttab" data-act="go" data-to="#/reminders" data-r="reminders">${ic('bell')}<span>Reminders</span><i class="pip hide" data-pip="reminders"></i></button>`}
         <button class="ttab more" data-act="more">${ic('menu')}<span>More</span></button></nav>
       <div class="pagehead"><button class="backbtn hide" data-act="back" aria-label="Go back">${ic('back')}<span>Back</span></button><h1 id="title"></h1></div>
       <div id="banner"></div><main id="view"></main></div>
@@ -362,7 +459,7 @@ function updateChrome() {
   $$('[data-gym]').forEach((e) => (e.innerHTML = brandHtml(S.settings.gymName)));
   const soon = S.members.filter((m) => { const l = memberInfo(m).left; return l >= 0 && l <= SOON_DAYS; }).length + S.members.filter(isWelcome).length;
   $$('[data-pip=reminders]').forEach((e) => { e.textContent = soon; e.classList.toggle('hide', !soon); });
-  $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard') || (S.route === 'edit' && b.dataset.r === 'members')));
+  $$('[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.route || (S.route === 'member' && b.dataset.r === 'members') || (S.route === 'duelist' && b.dataset.r === 'dashboard' && !isTrainer()) || (S.route === 'edit' && b.dataset.r === 'members')));
   $('.fab')?.classList.toggle('hide', S.route === 'add' || S.route === 'edit');
   $('.backbtn')?.classList.toggle('hide', S.route === 'dashboard');
   $('#banner').innerHTML = S.user && !S.user.emailVerified ? `<div class="verify">📧 Please verify your email (check your inbox). <button class="linkbtn" data-act="resendverify">Resend email</button></div>` : '';
@@ -370,8 +467,8 @@ function updateChrome() {
 const setTitle = (t) => { $('#title').textContent = t; document.title = t + ' · ' + S.settings.gymName; };
 const view = (html) => ($('#view').innerHTML = html);
 
-const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add: vForm, edit: vForm, reminders: vReminders, batches: vBatches, dues: vDues, duelist: vDueList, reports: vReports, settings: vSettings };
-const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'duelist', 'reports', 'member'];
+const routes = { dashboard: vDashboard, members: vMembers, member: vMember, add: vForm, edit: vForm, reminders: vReminders, batches: vBatches, dues: vDues, duelist: vDueList, reports: vReports, staff: vStaff, settings: vSettings };
+const LIVE = ['dashboard', 'reminders', 'batches', 'dues', 'duelist', 'reports', 'member', 'staff'];
 // our own page history so the Back button works inside the installed app too
 const navStack = [];
 const resetFilters = () => { S.q = ''; S.fPlan = ''; S.fBatch = ''; S.fStatus = ''; S.fJoin = false; S.mTab = 'active'; };
@@ -380,6 +477,7 @@ function route(keepScroll) {
   if (!S.shell) renderShell();
   const [name, arg] = (location.hash.slice(2) || 'dashboard').split('/');
   S.route = routes[name] ? name : 'dashboard'; S.arg = arg;
+  if (isTrainer() && !TRAINER_ROUTES.includes(S.route)) { location.replace('#/dashboard'); return; } // trainers only get their own screens
   if (!keepScroll && S.route !== 'add' && S.route !== 'edit') {
     const h = location.hash || '#/dashboard', k = navStack.lastIndexOf(h);
     if (k >= 0) navStack.length = k + 1; else navStack.push(h);
@@ -398,6 +496,7 @@ function refresh() {
   else if (S.route === 'members') drawMembers();
 }
 addEventListener('hashchange', () => { closeModal(); route(); });
+setInterval(() => { if (isTrainer() && S.shell && S.route === 'member') route(true); }, 30000); // keeps the edit countdown fresh
 
 // ------------------------------------------------------------------ modal
 function openModal(title, body, wide) {
@@ -427,7 +526,7 @@ const waFor = (m, i) => waLink(m.phone, msgFor(m, i));
 const waBtn = (m, i, cls = 'mp-btn wa') => { const w = isWelcome(m); return `<a class="${cls}" href="${waFor(m, i)}" target="_blank" rel="noopener"${w ? ` data-act="welcomesent" data-id="${m.id}"` : ''}>${ic('whatsapp')}${w ? 'Send welcome' : 'WhatsApp'}</a>`; };
 async function markWelcome(id, text) {
   const m = structuredClone(getMember(id)); if (!m || m.welcomeSent) return;
-  m.welcomeSent = true; m.logs.push({ at: Date.now(), text });
+  m.welcomeSent = true; m.logs.push(logEntry(text));
   try { await saveMember(m); } catch (e) { toast(errMsg(e), 'err'); }
 }
 function offerWelcome(m) {
@@ -445,29 +544,31 @@ function vDashboard() {
   const list = L(), month = todayStr().slice(0, 7);
   const active = list.filter((x) => x.i.status !== 'expired');
   const soon = list.filter((x) => x.i.left >= 0 && x.i.left <= SOON_DAYS).length;
-  const revenue = S.members.flatMap((m) => m.payments).filter((p) => p.date.startsWith(month)).reduce((a, p) => a + p.amount, 0);
+  const tr = isTrainer();
+  const revenue = tr ? 0 : S.members.flatMap((m) => m.payments).filter((p) => p.date.startsWith(month)).reduce((a, p) => a + p.amount, 0);
   const joins = S.members.filter((m) => m.joinDate.startsWith(month)).length;
   const dg = dueGroups();
   const planNames = [...new Set([...S.settings.plans.map((p) => p.name), ...active.map((x) => x.i.c.planName)])];
   const cnt = (b) => active.filter((x) => x.m.batch === b).length;
   const hr = new Date().getHours(), greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   const stat = (icon, tone, label, val, href, attrs = '', sub = '') => `<${href ? `a href="${href}" ${attrs}` : 'div'} class="stat ${tone}"><span class="si">${ic(icon)}</span><div><div class="l">${label}</div><b>${val}</b>${sub ? `<div class="l">${sub}</div>` : ''}</div></${href ? 'a' : 'div'}>`;
-  view(`<section class="hero"><div><div class="hero-sub">${greet}${S.settings.ownerName ? ', ' + esc(S.settings.ownerName.split(' ')[0]) : ''} 👋</div>
+  view(`<section class="hero"><div><div class="hero-sub">${greet}${(tr ? actorName() : S.settings.ownerName) ? ', ' + esc((tr ? actorName() : S.settings.ownerName).split(' ')[0]) : ''} 👋</div>
       <div class="hero-t bname">${brandHtml(S.settings.gymName)}</div><div class="hero-d">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
-      <a class="hero-n" href="#/reports"><div class="l">This month's revenue ›</div><b>${money(revenue)}</b></a></section>
-    <div class="quick"><a class="btn" href="#/reminders">${ic('bell')} Reminders</a><a class="btn" href="#/dues">${ic('wallet')} Collect Payment</a></div>
+      ${tr ? `<div class="hero-n"><div class="l">Logged in as</div><b class="who">${esc(actorName())}</b><div class="l">Trainer</div></div>` : `<a class="hero-n" href="#/reports"><div class="l">This month's revenue ›</div><b>${money(revenue)}</b></a>`}</section>
+    <div class="quick">${tr ? `<a class="btn" href="#/add">${ic('plus')} Add Member</a><a class="btn" href="#/duelist/renewal">${ic('wallet')} Pending Dues</a>` : `<a class="btn" href="#/reminders">${ic('bell')} Reminders</a><a class="btn" href="#/dues">${ic('wallet')} Collect Payment</a>`}</div>
     <div class="stats">
       ${stat('users', 'tone-blue', 'Total members', list.length, '#/members', 'data-act="filt"')}
       ${stat('check', 'tone-green', 'Active', active.length, '#/members', 'data-act="filt" data-st="live"')}
       ${stat('x', 'tone-red', 'Expired', list.length - active.length, '#/members', 'data-act="filt" data-st="expired"')}
-      ${stat('bell', 'tone-orange', 'Expiring soon', soon, '#/reminders')}
+      ${stat('bell', 'tone-orange', 'Expiring soon', soon, tr ? '#/duelist/renewal' : '#/reminders')}
       ${stat('userplus', 'tone-violet', 'New joinings', joins, '#/members', 'data-act="filt" data-join="1"')}
       ${stat('rupee', 'tone-red', 'Renewal dues', money(dg.rTotal), '#/duelist/renewal', '', `${dg.renewal.length} member${dg.renewal.length === 1 ? '' : 's'}`)}
       ${stat('wallet', 'tone-orange', 'Unpaid balance', money(dg.uTotal), '#/duelist/unpaid', '', `${dg.unpaid.length} member${dg.unpaid.length === 1 ? ' still owes' : 's still owe'} money`)}</div>
     <div class="dash"><div><h2>Active members by plan</h2><div class="card">${planNames.map((n) => `<a class="kv" href="#/members" data-act="filt" data-st="live" data-plan="${esc(n)}"><span>${esc(n)}</span><b>${active.filter((x) => x.i.c.planName === n).length} ›</b></a>`).join('') || '<span class="mut">No plans yet</span>'}</div></div>
     <div><h2>Active members by batch</h2><div class="card">
-      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
-      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Evening"><span>🌙 Evening batch</span><b>${cnt('Evening')}</b></a></div></div></div>`);
+      ${tr ? `<div class="kv"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></div><div class="kv"><span>🌙 Evening batch</span><b>${cnt('Evening')}</b></div>`
+        : `<a class="kv" href="#/batches" data-act="tabbatch" data-b="Morning"><span>☀️ Morning batch</span><b>${cnt('Morning')}</b></a>
+      <a class="kv" href="#/batches" data-act="tabbatch" data-b="Evening"><span>🌙 Evening batch</span><b>${cnt('Evening')}</b></a>`}</div></div></div>`);
 }
 
 // ------------------------------------------------------------------ MEMBERS list
@@ -475,7 +576,7 @@ function vMembers() {
   setTitle('Members');
   const opt = (arr, v) => arr.map(([val, l]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${l}</option>`).join('');
   view(`<div class="bar"><div class="mut">Search, filter and manage your members</div><button class="btn primary" data-act="go" data-to="#/add">${ic('plus')} Add Member</button></div>
-    <div class="toolbar"><input id="q" type="search" placeholder="Search name or phone" value="${esc(S.q)}">
+    <div class="toolbar"><input id="q" type="search" placeholder="${isTrainer() ? 'Search by name' : 'Search name or phone'}" value="${esc(S.q)}">
     <select id="fPlan"><option value="">All plans</option>${opt(S.settings.plans.map((p) => [p.name, p.name]), S.fPlan)}</select>
     <select id="fBatch"><option value="">All batches</option>${opt([['Morning', 'Morning'], ['Evening', 'Evening']], S.fBatch)}</select>
 </div>
@@ -490,7 +591,7 @@ function drawMembers() {
   const box = $('#mlist'); if (!box) return;
   const q = S.q.trim().toLowerCase();
   const base = L().filter((x) =>
-    (!q || x.m.name.toLowerCase().includes(q) || x.m.phone.includes(q.replace(/\D/g, '') || '§')) &&
+    (!q || x.m.name.toLowerCase().includes(q) || (!isTrainer() && x.m.phone.includes(q.replace(/\D/g, '') || '§'))) &&
     (!S.fPlan || x.i.c.planName === S.fPlan) && (!S.fBatch || x.m.batch === S.fBatch) && (!S.fJoin || x.m.joinDate.startsWith(todayStr().slice(0, 7))));
   // Active and Expired are kept in separate lists (tabs). "New joinings" shows everyone who joined this month in one list.
   const nAct = base.filter((x) => x.i.status !== 'expired').length, nExp = base.length - nAct;
@@ -503,48 +604,96 @@ function drawMembers() {
   const th = (k, l) => `<th data-act="sort" data-k="${k}">${l}${S.sort.k === k ? (S.sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   box.innerHTML = `${tabs}${chips}<div class="mut sm" style="margin-bottom:8px">${list.length} member${list.length > 1 ? 's' : ''}</div>
   <div class="cards-only">${list.map(({ m, i }) => `<div class="mcard" data-act="open" data-id="${m.id}">${avatar(m)}<div class="info"><div class="nm">${esc(m.name)}</div>
-    <div class="sm mut">${esc(m.phone)} · ${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">Due ${fmtDate(i.c.due)}</div>
-    <div class="row2">${daysBadge(i.left)}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}</div></div></div>`).join('')}</div>
-  <div class="table-only tablewrap"><table><thead><tr><th>Photo</th>${th('name', 'Name')}${th('phone', 'Phone')}${th('plan', 'Plan')}${th('batch', 'Batch')}${th('start', 'Start')}${th('due', 'Due date')}${th('left', 'Days left')}${th('status', 'Status')}${th('dues', 'Pending')}</tr></thead>
-  <tbody>${list.map(({ m, i }) => `<tr class="clickable" data-act="open" data-id="${m.id}"><td>${avatar(m)}</td><td><b>${esc(m.name)}</b></td><td>${esc(m.phone)}</td><td>${esc(i.c.planName)}</td><td>${m.batch}</td><td>${fmtDate(i.c.start)}</td><td>${fmtDate(i.c.due)}</td><td>${daysBadge(i.left)}</td><td>${statusBadge(i.status)}</td><td>${i.balance ? `<b style="color:var(--red)">${money(i.balance)}</b>` : '-'}</td></tr>`).join('')}</tbody></table></div>`;
+    <div class="sm mut">${isTrainer() ? '' : esc(m.phone) + ' · '}${esc(i.c.planName)} · ${m.batch}</div><div class="sm mut">Due ${fmtDate(i.c.due)}</div>
+    <div class="row2">${daysBadge(i.left)}${i.balance ? `<span class="badge red">Due ${money(i.balance)}</span>` : ''}${m.health && canSeeHealth() ? '<span class="badge orange" title="Health note added">Health note</span>' : ''}</div></div></div>`).join('')}</div>
+  <div class="table-only tablewrap"><table><thead><tr><th>Photo</th>${th('name', 'Name')}${isTrainer() ? '' : th('phone', 'Phone')}${th('plan', 'Plan')}${th('batch', 'Batch')}${th('start', 'Start')}${th('due', 'Due date')}${th('left', 'Days left')}${th('status', 'Status')}${th('dues', 'Pending')}</tr></thead>
+  <tbody>${list.map(({ m, i }) => `<tr class="clickable" data-act="open" data-id="${m.id}"><td>${avatar(m)}</td><td><b>${esc(m.name)}</b>${m.health && canSeeHealth() ? ' <span class="badge orange" title="Health note added">Health</span>' : ''}</td>${isTrainer() ? '' : `<td>${esc(m.phone)}</td>`}<td>${esc(i.c.planName)}</td><td>${m.batch}</td><td>${fmtDate(i.c.start)}</td><td>${fmtDate(i.c.due)}</td><td>${daysBadge(i.left)}</td><td>${statusBadge(i.status)}</td><td>${i.balance ? `<b style="color:var(--red)">${money(i.balance)}</b>` : '-'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------------ health & fitness helpers
+const GOALS = ['Weight loss', 'Muscle gain', 'General fitness', 'Strength', 'Stamina', 'Other'];
+const kgTxt = (n) => (Math.round(n * 10) / 10) + ' kg';
+const bmiOf = (kg, cm) => (kg > 0 && cm > 0 ? kg / ((cm / 100) ** 2) : 0);
+const bmiInfo = (b) => (b < 18.5 ? ['Underweight', 'blue'] : b < 25 ? ['Normal', 'green'] : b < 30 ? ['Overweight', 'orange'] : ['Obese', 'red']);
+const goalOf = (m) => (m.goal === 'Other' ? (m.goalOther || 'Other') : m.goal || '');
+function syncWeight(m) {
+  m.weights = (m.weights || []).slice().sort((x, y) => (x.date > y.date ? 1 : x.date < y.date ? -1 : (x.at || 0) - (y.at || 0)));
+  m.weight = m.weights.length ? m.weights[m.weights.length - 1].kg : '';
+}
+function sparkline(ws) {
+  if (ws.length < 2) return '';
+  const W = 300, H = 70, P = 8, ys = ws.map((w) => w.kg), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+  const pts = ws.map((w, i) => [P + (i * (W - 2 * P)) / (ws.length - 1), H - P - ((w.kg - lo) / span) * (H - 2 * P)]);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="#0877d1" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>${pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="${i === pts.length - 1 ? 5 : 3.5}" fill="${i === pts.length - 1 ? '#fab706' : '#0877d1'}"/>`).join('')}</svg>`;
+}
+function healthCards(m, mayEdit = true) {
+  const ws = [...(m.weights || [])].sort((x, y) => (x.date > y.date ? 1 : x.date < y.date ? -1 : (x.at || 0) - (y.at || 0)));
+  const kg = +m.weight || 0, cm = +m.height || 0, b = bmiOf(kg, cm), bi = b ? bmiInfo(b) : null, goal = goalOf(m);
+  const any = kg || cm || goal || m.health;
+  const tile = (l, v, extra = '') => `<div class="hf-tile"><small>${l}</small><b>${v}</b>${extra}</div>`;
+  const good = (diff) => (m.goal === 'Weight loss' ? diff < 0 : m.goal === 'Muscle gain' ? diff > 0 : null);
+  const rows = ws.map((w, i) => {
+    const d = i ? Math.round((w.kg - ws[i - 1].kg) * 10) / 10 : null;
+    const g = d === null || d === 0 ? null : good(d);
+    const chg = d === null ? '<span class="mut">Start</span>' : d === 0 ? '<span class="mut">No change</span>' : `<b class="${g === true ? 'wt-good' : g === false ? 'wt-bad' : ''}">${d < 0 ? '▼' : '▲'} ${Math.abs(d)} kg</b>`;
+    return `<tr><td>${fmtDate(w.date)}</td><td><b>${kgTxt(w.kg)}</b></td><td>${chg}</td><td style="text-align:right">${mayEdit ? `<button class="btn sm" data-act="delweight" data-id="${m.id}" data-w="${w.id}" aria-label="Delete this weight entry">${ic('trash')}</button>` : ''}</td></tr>`;
+  }).reverse().join('');
+  const tot = ws.length > 1 ? Math.round((ws[ws.length - 1].kg - ws[0].kg) * 10) / 10 : null;
+  return `<h2>Health &amp; fitness</h2><div class="card">
+    ${any ? `<div class="hf-tiles">${tile('Weight', kg ? kgTxt(kg) : '-')}${tile('Height', cm ? cm + ' cm' : '-')}${tile('BMI', b ? b.toFixed(1) : '-', bi ? `<span class="badge ${bi[1]}">${bi[0]}</span>` : '')}</div>
+      <div class="hf-line"><span class="mut">Goal</span>${goal ? `<span class="goal-tag">${esc(goal)}</span>` : '<b>-</b>'}</div>
+      ${m.health ? `<div class="hf-note"><b>Health note</b><span>${esc(m.health)}</span></div>` : '<div class="hf-line"><span class="mut">Health issues</span><b>None noted</b></div>'}`
+      : `<div class="mut" style="padding:6px 0">No health details added yet.</div>`}
+    ${mayEdit ? `<button class="btn block" style="margin-top:12px" data-act="go" data-to="#/edit/${m.id}">${ic('edit')} Edit health details</button>` : ''}</div>
+  <h2>Weight progress</h2><div class="card">
+    ${ws.length ? `${sparkline(ws)}${tot !== null ? `<div class="hf-line" style="margin-top:6px"><span class="mut">Since ${fmtDate(ws[0].date)}</span><b class="${good(tot) === true ? 'wt-good' : good(tot) === false ? 'wt-bad' : ''}">${tot === 0 ? 'No change' : (tot < 0 ? '▼ ' : '▲ ') + Math.abs(tot) + ' kg'}</b></div>` : ''}
+      <div class="tablewrap"><table class="wt-table"><thead><tr><th>Date</th><th>Weight</th><th>Change</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="mut" style="padding:6px 0">No weight recorded yet.</div>'}
+    ${mayEdit ? `<button class="btn primary block" style="margin-top:12px" data-act="addweight" data-id="${m.id}">${ic('plus')} Add new weight</button>` : ''}</div>`;
 }
 
 // ------------------------------------------------------------------ MEMBER profile
 function vMember(id) {
   const m = getMember(id);
   if (!m) { location.hash = '#/members'; return; }
-  const i = memberInfo(m);
+  const i = memberInfo(m), tr = isTrainer(), mayEdit = canEdit(m);
   setTitle(m.name);
   const rens = [...m.renewals].reverse(), pays = [...m.payments].reverse();
   const total = Math.max(1, diffDays(i.c.due, i.c.start)), used = Math.min(100, Math.max(0, Math.round((diffDays(todayStr(), i.c.start) / total) * 100)));
+  const mins = Math.max(1, Math.ceil(editLeft(m) / 60000));
+  const stampTxt = (t) => (t ? new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+  const addedLine = m.addedBy ? `<div class="mp-by">Added by <b>${esc(m.addedBy)}</b>${m.createdAt ? ' · ' + stampTxt(m.createdAt) : ''}</div>` : '';
+  const who = (x) => (x.by ? esc(x.by) : '<span class="mut">-</span>');
+  const details = [['Age', m.age], ['Gender', m.gender], ['Joined', fmtDate(m.joinDate)], ...(tr ? [] : [['Emergency contact', m.emergency]]), ['Address', m.address], ['Notes', m.notes]];
   view(`<a href="#/members" class="sm">‹ All members</a>
+  ${tr && mayEdit ? `<div class="edit-banner">✏️ You added this member. You can edit the details for <b>${mins} more minute${mins === 1 ? '' : 's'}</b>.</div>` : ''}
   <div class="mp-card"><div class="mp-head">${avatar(m, true)}<div class="mp-id"><h2>${esc(m.name)}</h2>
-    <div class="mp-sub">${ic('phone')}<span>${esc(m.phone)} · ${m.batch} batch</span></div><div class="mp-badges">${statusBadge(i.status)} ${daysBadge(i.left)}</div></div>
-    <button class="mp-kebab" data-act="mmenu" data-id="${m.id}" aria-label="More actions">${ic('dots')}</button></div>
+    <div class="mp-sub">${tr ? '' : ic('phone')}<span>${tr ? '' : esc(m.phone) + ' · '}${m.batch} batch</span></div>${addedLine}<div class="mp-badges">${statusBadge(i.status)} ${daysBadge(i.left)}</div></div>
+    ${!tr || mayEdit ? `<button class="mp-kebab" data-act="mmenu" data-id="${m.id}" aria-label="More actions">${ic('dots')}</button>` : ''}</div>
     <div class="mp-btns"><button class="mp-btn pri" data-act="renew" data-id="${m.id}">${ic('refresh')}Renew</button>
-    ${waBtn(m, i)}
-    <a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a></div>
+    ${tr ? '' : `${waBtn(m, i)}<a class="mp-btn" href="tel:${m.phone}">${ic('phone')}Call</a>`}</div>
     ${i.balance ? `<button class="mp-collect" data-act="collect" data-id="${m.id}">${ic('wallet')}Collect pending ${money(i.balance)}</button>` : ''}</div>
-  <div class="mp-tiles"><div class="mp-tile"><span>Total billed</span><b>${money(i.net)}</b></div><div class="mp-tile"><span>Total paid</span><b>${money(i.paid)}</b></div>
+  <div class="mp-tiles ${tr ? 'one' : ''}">${tr ? '' : `<div class="mp-tile"><span>Total billed</span><b>${money(i.net)}</b></div><div class="mp-tile"><span>Total paid</span><b>${money(i.paid)}</b></div>`}
     <div class="mp-tile"><span>Pending</span><b style="color:${i.balance ? 'var(--red)' : 'var(--green)'}">${money(i.balance)}</b></div></div>
   <div class="dash"><div><h2>Subscription</h2><div class="card">
     <div class="mp-prog-h"><b>${esc(i.c.planName)}</b><span class="mut sm">${daysText(i.left)}</span></div>
     <div class="mp-bar"><i style="width:${used}%"></i></div>
     <div class="mp-prog-f"><span>Start ${fmtDate(i.c.start)}</span><span>Due ${fmtDate(i.c.due)}</span></div>
-    <button class="btn block" style="margin-top:14px" data-act="editrenew" data-id="${m.id}">${ic('edit')} Edit renewal date / plan</button></div></div>
+    ${mayEdit ? `<button class="btn block" style="margin-top:14px" data-act="editrenew" data-id="${m.id}">${ic('edit')} Edit renewal date / plan</button>` : ''}</div></div>
   <div><h2>Details</h2><div class="card">
-    ${[['Age', m.age], ['Gender', m.gender], ['Joined', fmtDate(m.joinDate)], ['Emergency contact', m.emergency], ['Address', m.address], ['Notes', m.notes]].map(([k, v]) => `<div class="kv"><span class="mut">${k}</span><b style="text-align:right;max-width:60%">${esc(v) || '-'}</b></div>`).join('')}</div></div></div>
-    <h2>Renewal history</h2><div class="tablewrap"><table><thead><tr><th>Renewed on</th><th>Plan</th><th>Amount</th><th>Discount</th><th>Start</th><th>Due</th></tr></thead><tbody>
-    ${rens.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(r.planName)}</td><td>${money(r.price)}</td><td>${money(r.discount)}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.due)}</td></tr>`).join('')}</tbody></table></div>
-  <h2>Payment history & invoices</h2>${pays.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Mode</th><th>Invoice</th><th></th></tr></thead><tbody>
-    ${pays.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${money(p.amount)}</td><td>${p.mode}</td><td>${esc(p.invoiceNo || '-')}</td><td><button class="btn sm" data-act="invoice" data-id="${m.id}" data-p="${p.id}">🧾 Invoice</button></td></tr>`).join('')}</tbody></table></div>` : empty('No payments yet')}
-  ${m.logs.length ? `<h2>Edit log</h2><div class="card sm">${[...m.logs].reverse().map((l) => `<div class="kv"><span>${esc(l.text)}</span><span class="mut">${new Date(l.at).toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}`);
+    ${details.map(([k, v]) => `<div class="kv"><span class="mut">${k}</span><b style="text-align:right;max-width:60%">${esc(v) || '-'}</b></div>`).join('')}</div></div></div>
+    ${canSeeHealth() ? healthCards(m, mayEdit) : ''}
+    <h2>Renewal history</h2><div class="tablewrap"><table><thead><tr><th>Renewed on</th><th>Plan</th>${tr ? '' : '<th>Amount</th><th>Discount</th>'}<th>Start</th><th>Due</th><th>Renewed by</th></tr></thead><tbody>
+    ${rens.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(r.planName)}</td>${tr ? '' : `<td>${money(r.price)}</td><td>${money(r.discount)}</td>`}<td>${fmtDate(r.start)}</td><td>${fmtDate(r.due)}</td><td>${r.by ? esc(r.by) : (m.renewals[0] === r && m.addedBy ? esc(m.addedBy) : '<span class="mut">-</span>')}</td></tr>`).join('')}</tbody></table></div>
+  <h2>Payment history & invoices</h2>${pays.length ? `<div class="tablewrap"><table><thead><tr><th>Date</th>${tr ? '' : '<th>Amount</th>'}<th>Mode</th><th>Collected by</th><th>Invoice</th><th></th></tr></thead><tbody>
+    ${pays.map((p) => `<tr><td>${fmtDate(p.date)}</td>${tr ? '' : `<td>${money(p.amount)}</td>`}<td>${p.mode}</td><td>${who(p)}</td><td>${esc(p.invoiceNo || '-')}</td><td><button class="btn sm" data-act="invoice" data-id="${m.id}" data-p="${p.id}">🧾 Invoice</button></td></tr>`).join('')}</tbody></table></div>` : empty('No payments yet')}
+  ${m.logs.length ? `<h2>Edit log</h2><div class="card sm">${[...m.logs].reverse().map((l) => `<div class="kv"><span>${esc(l.text)}${l.by ? ` <span class="mut">· ${esc(l.by)}</span>` : ''}</span><span class="mut">${new Date(l.at).toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}`);
 }
 
 // ------------------------------------------------------------------ ADD / EDIT member form
 function vForm(id) {
   const m = S.route === 'edit' ? getMember(id) : null;
   if (S.route === 'edit' && !m) { location.hash = '#/members'; return; }
+  if (m && !canEdit(m)) { toast('The 10-minute edit time for this member is over. Please ask the owner to change it.', 'err'); location.hash = '#/member/' + m.id; return; }
   setTitle(m ? 'Edit Member' : 'Add Member');
   const v = (k) => esc(m?.[k] ?? '');
   const sel = (k, arr, d) => arr.map((x) => `<option ${(m?.[k] ?? d) === x ? 'selected' : ''}>${x}</option>`).join('');
@@ -565,6 +714,13 @@ function vForm(id) {
     <div class="grid2"><label>Emergency contact<input name="emergency" value="${v('emergency')}" placeholder="Name & number"></label>
       <label>Joining date<input name="joinDate" type="date" required value="${m?.joinDate || todayStr()}"></label></div>
     <label>Address<textarea name="address" style="min-height:64px">${v('address')}</textarea></label>
+    <div class="hf-box"><h2 style="margin-top:0">Health &amp; fitness profile <span class="mut sm" style="font-weight:500">(optional)</span></h2>
+      <div class="grid2"><label>Weight (kg)<input name="weight" type="number" inputmode="decimal" min="20" max="300" step="0.1" placeholder="e.g. 72" value="${v('weight')}"></label>
+        <label>Height (cm)<input name="height" type="number" inputmode="decimal" min="80" max="250" step="0.1" placeholder="e.g. 170" value="${v('height')}"></label></div>
+      <label>Health issues<textarea name="health" style="min-height:64px" placeholder="e.g. back pain, asthma, diabetes, old injury. Leave empty if none.">${v('health')}</textarea></label>
+      <div class="grid2"><label>Fitness goal<select name="goal" id="goalSel"><option value="">Select goal</option>${GOALS.map((g) => `<option ${m?.goal === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
+        <label id="goalOtherBox" class="${m?.goal === 'Other' ? '' : 'hide'}">Write the goal<input name="goalOther" value="${v('goalOther')}" placeholder="e.g. marathon training"></label></div>
+      <div class="preview hide" id="bmiPrev" style="margin:0"></div></div>
     ${m ? `<div class="note">Changing the <b>joining date</b> here recalculates the due date automatically (joining date + plan days). To change the plan use <b>Edit renewal date / plan</b> on the profile.</div>` : `
     <h2>Plan & payment</h2>
     <div class="grid2"><label>Plan<select name="plan">${planOptions(firstPlan?.id)}</select></label>
@@ -576,6 +732,18 @@ function vForm(id) {
     <div class="actions"><button class="btn primary" type="submit">💾 Save member</button><button class="btn" type="button" data-act="go" data-to="${m ? '#/member/' + m.id : '#/members'}">Cancel</button></div></form>`);
   if (!m) updateAddPreview(true);
   bindPhotoDrop();
+  bindHealthForm();
+}
+function bindHealthForm() {
+  const f = $('#mform'); if (!f) return;
+  const upd = () => {
+    $('#goalOtherBox')?.classList.toggle('hide', f.goal.value !== 'Other');
+    const b = bmiOf(+f.weight.value, +f.height.value), box = $('#bmiPrev');
+    if (box) { box.classList.toggle('hide', !b); if (b) { const i = bmiInfo(b); box.innerHTML = `<div class="kv"><span>BMI (calculated)</span><b>${b.toFixed(1)} · <span class="badge ${i[1]}">${i[0]}</span></b></div>`; } }
+  };
+  ['weight', 'height'].forEach((n) => f[n].addEventListener('input', upd));
+  f.goal.addEventListener('change', upd);
+  upd();
 }
 function updateAddPreview(resetPaid) {
   const f = $('#mform'); if (!f || f.dataset.id) return;
@@ -630,14 +798,21 @@ formHandlers.member = async (f) => {
   if (dup) return showErr(f, `A member with this phone number already exists: ${dup.name}.`);
   busy(f, true);
   try {
-    const base = { name: d.name.trim(), phone, age: d.age, gender: d.gender, batch: d.batch, emergency: d.emergency, address: d.address, joinDate: d.joinDate, notes: d.notes, photo: S.photo || '' };
+    const wt = d.weight === '' ? '' : +d.weight, ht = d.height === '' ? '' : +d.height;
+    if (wt !== '' && !(wt >= 20 && wt <= 300)) throw { message: 'Weight should be between 20 and 300 kg.' };
+    if (ht !== '' && !(ht >= 80 && ht <= 250)) throw { message: 'Height should be between 80 and 250 cm.' };
+    const base = { name: d.name.trim(), phone, age: d.age, gender: d.gender, batch: d.batch, emergency: d.emergency, address: d.address, joinDate: d.joinDate, notes: d.notes, photo: S.photo || '',
+      height: ht, health: (d.health || '').trim(), goal: d.goal || '', goalOther: d.goal === 'Other' ? (d.goalOther || '').trim() : '' };
     if (editId) {
       const m = structuredClone(getMember(editId)), oldJoin = m.joinDate;
+      const prevW = +m.weight || 0;
       Object.assign(m, base);
+      if (wt !== '' && wt !== prevW) { m.weights = m.weights || []; m.weights.push({ id: uid(), date: todayStr(), kg: wt, at: Date.now() }); }
+      syncWeight(m);
       if (oldJoin !== m.joinDate) {
         const oldDue = curRenewal(m).due;
         rechain(m);
-        m.logs.push({ at: Date.now(), text: `Joining date ${fmtDate(oldJoin)} → ${fmtDate(m.joinDate)}; due date ${fmtDate(oldDue)} → ${fmtDate(curRenewal(m).due)}; payment & invoice dates follow the joining date` });
+        m.logs.push(logEntry(`Joining date ${fmtDate(oldJoin)} → ${fmtDate(m.joinDate)}; due date ${fmtDate(oldDue)} → ${fmtDate(curRenewal(m).due)}; payment & invoice dates follow the joining date`));
       }
       await saveMember(m);
       toast(oldJoin !== m.joinDate ? 'Updated. New due date: ' + fmtDate(curRenewal(m).due) : 'Member updated'); location.hash = '#/member/' + editId;
@@ -647,12 +822,13 @@ formHandlers.member = async (f) => {
       const disc = Math.max(0, +d.discount || 0), paid = Math.max(0, +d.paid || 0), net = Math.max(0, p.price - disc);
       if (paid > net) throw { message: 'Amount paid cannot be more than the plan price after discount.' };
       const per = calcPeriod(null, d.joinDate, p.days);
-      const m = { id: uid(), ...base, createdAt: Date.now(), payments: [], logs: [{ at: Date.now(), text: 'Member added' }],
-        renewals: [{ id: uid(), date: d.joinDate, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, start: per.start, due: per.due }] };
+      const m = { id: uid(), ...base, weight: '', weights: wt === '' ? [] : [{ id: uid(), date: d.joinDate, kg: wt, at: Date.now() }], createdAt: Date.now(), addedBy: actorName(), addedByUid: S.user.uid, payments: [], logs: [logEntry('Member added')],
+        renewals: [{ id: uid(), date: d.joinDate, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, start: per.start, due: per.due, ...byTag() }] };
+      syncWeight(m);
       if (paid > 0) await addPayment(m, paid, d.mode, d.joinDate, net - paid);
-      await saveMember(m);
+      await saveNewMember(m);
       toast('Member added'); location.hash = '#/member/' + m.id;
-      setTimeout(() => offerWelcome(m), 250);
+      if (!isTrainer()) setTimeout(() => offerWelcome(m), 250);
     }
   } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
@@ -692,7 +868,7 @@ async function nextInvoiceNo() {
 // pushes a payment (with invoice snapshot) onto member m (caller saves the member)
 async function addPayment(m, amount, mode, date, balanceAfter, note = '') {
   const c = curRenewal(m);
-  m.payments.push({ id: uid(), date, amount, mode, note, invoiceNo: await nextInvoiceNo(), renewalId: c.id,
+  m.payments.push({ id: uid(), date, amount, mode, note, ...byTag(), invoiceNo: await nextInvoiceNo(), renewalId: c.id,
     snap: { planName: c.planName, start: c.start, due: c.due, price: c.price, discount: c.discount || 0, balance: balanceAfter } });
 }
 
@@ -738,8 +914,8 @@ formHandlers.renew = async (f) => {
   if (per.due < per.start) return showErr(f, 'Due date cannot be earlier than the start date.');
   busy(f, true);
   try {
-    m.renewals.push({ id: uid(), date: d.date, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, start: per.start, due: per.due });
-    m.logs.push({ at: Date.now(), text: `Renewed ${p.name}: ${fmtDate(per.start)} → ${fmtDate(per.due)}` });
+    m.renewals.push({ id: uid(), date: d.date, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, start: per.start, due: per.due, ...byTag() });
+    m.logs.push(logEntry(`Renewed ${p.name}: ${fmtDate(per.start)} → ${fmtDate(per.due)}`));
     if (paid > 0) await addPayment(m, paid, d.mode, d.date, Math.max(0, memberInfo(m).balance - paid));
     await saveMember(m);
     closeModal(); toast('Renewed until ' + fmtDate(per.due));
@@ -783,10 +959,27 @@ formHandlers.editrenew = async (f) => {
   if (old.price !== r.price) ch.push(`amount ${money(old.price)} → ${money(r.price)}`);
   if (moved) ch.push(`payment & invoice date → ${fmtDate(r.date)}`);
   if (!ch.length) return closeModal();
-  m.logs.push({ at: Date.now(), text: 'Renewal edited: ' + ch.join('; ') });
+  m.logs.push(logEntry('Renewal edited: ' + ch.join('; ')));
   syncSnaps(m);
   busy(f, true);
   try { await saveMember(m); closeModal(); toast('Renewal updated. Due date: ' + fmtDate(r.due)); } catch (e) { showErr(f, errMsg(e)); }
+  busy(f, false);
+};
+
+// ADD weight (keeps history)
+function openAddWeight(id) {
+  const m = getMember(id); if (!m) return;
+  openModal('Add weight · ' + esc(m.name), `<form data-form="addweight" data-id="${id}"><div class="err hide" data-err></div>
+    ${m.weight ? `<div class="preview"><div class="kv"><span>Last recorded</span><b>${kgTxt(+m.weight)}</b></div></div>` : ''}
+    <div class="grid2"><label>Weight (kg) *<input type="number" name="kg" inputmode="decimal" min="20" max="300" step="0.1" required autofocus></label>
+    <label>Date<input type="date" name="date" value="${todayStr()}" max="${todayStr()}" required></label></div>
+    <button class="btn primary block" type="submit">Save weight</button></form>`);
+}
+formHandlers.addweight = async (f) => {
+  const d = Object.fromEntries(new FormData(f)), m = structuredClone(getMember(f.dataset.id)), kg = +d.kg;
+  if (!(kg >= 20 && kg <= 300)) return showErr(f, 'Weight should be between 20 and 300 kg.');
+  busy(f, true);
+  try { m.weights = m.weights || []; m.weights.push({ id: uid(), date: d.date, kg, at: Date.now() }); syncWeight(m); await saveMember(m); closeModal(); toast('Weight saved'); } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
 };
 
@@ -804,7 +997,7 @@ formHandlers.collect = async (f) => {
   const d = Object.fromEntries(new FormData(f)), m = structuredClone(getMember(f.dataset.id)), amt = +d.amount, bal = memberInfo(m).balance;
   if (!(amt > 0) || amt > bal) return showErr(f, `Enter an amount between 1 and ${money(bal)}.`);
   busy(f, true);
-  try { await addPayment(m, amt, d.mode, d.date, bal - amt, 'Dues payment'); await saveMember(m); closeModal(); toast('Payment saved'); } catch (e) { showErr(f, errMsg(e)); }
+  try { await addPayment(m, amt, d.mode, d.date, bal - amt, 'Dues payment'); m.logs.push(logEntry(`Collected ${money(amt)} (${d.mode}) - dues payment`)); await saveMember(m); closeModal(); toast('Payment saved'); } catch (e) { showErr(f, errMsg(e)); }
   busy(f, false);
 };
 
@@ -815,9 +1008,9 @@ function openInvoice(mid, pid) {
   openModal('Invoice ' + esc(d.no), `<div class="preview"><div class="kv"><span>${esc(d.name)}</span><b>${money(d.paid)}</b></div><div class="kv"><span>${esc(d.plan)}</span><span>${fmtDate(d.start)} → ${fmtDate(d.due)}</span></div><div class="kv"><span>Balance due</span><b>${money(d.balance)}</b></div></div>
     <div class="actions"><button class="btn primary" data-act="invpdf" data-m="${mid}" data-p="${pid}">⬇️ Download PDF</button>
     <button class="btn" data-act="invprint" data-m="${mid}" data-p="${pid}">🖨 Print</button>
-    <button class="btn green" data-act="invwa" data-m="${mid}" data-p="${pid}">Send on WhatsApp</button></div>`);
+    ${isTrainer() ? '' : `<button class="btn green" data-act="invwa" data-m="${mid}" data-p="${pid}">Send on WhatsApp</button>`}</div>`);
 }
-const invFor = (a) => { const m = getMember(a.m), p = m.payments.find((x) => x.id === a.p); return invoiceData(S.settings, m, p); };
+const invFor = (a) => { const m = getMember(a.m), p = m.payments.find((x) => x.id === a.p), d = invoiceData(S.settings, m, p); if (isTrainer()) d.phone = ''; return d; };
 
 // ------------------------------------------------------------------ REMINDERS
 function reminderRow(x, expired) {
@@ -890,7 +1083,7 @@ function dueRow(x, kind) {
     <div class="sm mut">${esc(i.c.planName)} · ${m.batch} · due ${fmtDate(i.c.due)}</div>
     <div style="margin-top:4px">${daysBadge(i.left)}${!unpaid && i.balance ? ` <span class="badge red">Unpaid ${money(i.balance)}</span>` : ''}${unpaid ? ` <span class="badge blue">Plan ${money(i.c.price)}</span>` : ''}</div></div>
     <div style="text-align:right"><div class="sm mut">${unpaid ? 'Unpaid balance' : 'Plan price'}</div><b style="font-size:18px;color:${unpaid ? 'var(--red)' : 'inherit'}">${money(amt)}</b></div>
-    <div class="acts"><button class="btn primary" data-act="renew" data-id="${m.id}">Renew</button><a class="btn green" href="${wa}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="tel:${m.phone}">📞 Call</a>${i.balance ? `<button class="btn" data-act="collect" data-id="${m.id}">💰 Collect ${money(i.balance)}</button>` : ''}</div></div>`;
+    <div class="acts"><button class="btn primary" data-act="renew" data-id="${m.id}">Renew</button>${isTrainer() ? '' : `<a class="btn green" href="${wa}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="tel:${m.phone}">📞 Call</a>`}${i.balance ? `<button class="btn" data-act="collect" data-id="${m.id}">💰 Collect ${money(i.balance)}</button>` : ''}</div></div>`;
 }
 function vDueList(kind) {
   kind = kind === 'unpaid' ? 'unpaid' : 'renewal';
@@ -935,8 +1128,8 @@ function vReports() {
 }
 const stamp = () => todayStr();
 function exportCSV(kind) {
-  if (kind === 'members') download(`members-${stamp()}.csv`, csv([['Name', 'Phone', 'Age', 'Gender', 'Address', 'Emergency', 'Joined', 'Batch', 'Plan', 'Start', 'Due', 'Days left', 'Status', 'Billed', 'Paid', 'Pending', 'Notes'],
-    ...L().map(({ m, i }) => [m.name, m.phone, m.age, m.gender, m.address, m.emergency, m.joinDate, m.batch, i.c.planName, i.c.start, i.c.due, i.left, i.status, i.net, i.paid, i.balance, m.notes])]));
+  if (kind === 'members') download(`members-${stamp()}.csv`, csv([['Name', 'Phone', 'Age', 'Gender', 'Address', 'Emergency', 'Joined', 'Batch', 'Plan', 'Start', 'Due', 'Days left', 'Status', 'Billed', 'Paid', 'Pending', 'Notes', 'Weight (kg)', 'Height (cm)', 'BMI', 'Health issues', 'Fitness goal'],
+    ...L().map(({ m, i }) => [m.name, m.phone, m.age, m.gender, m.address, m.emergency, m.joinDate, m.batch, i.c.planName, i.c.start, i.c.due, i.left, i.status, i.net, i.paid, i.balance, m.notes, m.weight, m.height, bmiOf(+m.weight, +m.height) ? bmiOf(+m.weight, +m.height).toFixed(1) : '', m.health, goalOf(m)])]));
   if (kind === 'payments') download(`payments-${stamp()}.csv`, csv([['Date', 'Invoice', 'Member', 'Phone', 'Amount', 'Mode', 'Plan', 'Note'],
     ...S.members.flatMap((m) => m.payments.map((p) => [p.date, p.invoiceNo, m.name, m.phone, p.amount, p.mode, p.snap?.planName, p.note])).sort((a, b) => a[0].localeCompare(b[0]))]));
   if (kind === 'renewals') download(`renewals-${stamp()}.csv`, csv([['Member', 'Phone', 'Renewed on', 'Plan', 'Days', 'Price', 'Discount', 'Start', 'Due'],
@@ -1016,6 +1209,58 @@ function vSettings() {
     e.target.value = '';
   });
 }
+// ------------------------------------------------------------------ TRAINERS (owner only)
+const sref2 = (key) => doc(db, 'gyms', uidOf(), 'staff', key);
+function vStaff() {
+  setTitle('Trainers');
+  const list = [...S.staffList].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const when = (t) => new Date(t).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const status = (t) => (t.active === false ? '<span class="badge red">Switched off</span>' : t.lastSeenAt ? '<span class="badge green">Active</span>' : '<span class="badge orange">Invited · not signed up yet</span>');
+  const acts = S.members.flatMap((m) => m.logs.filter((l) => l.byId && l.by && l.by !== 'Owner').map((l) => ({ m, l }))).sort((a, b) => b.l.at - a.l.at).slice(0, 30);
+  view(`<div class="dash"><div>
+    <h2 style="margin-top:0">Invite a trainer</h2>
+    <form class="card" data-form="invite" autocomplete="off"><div class="err hide" data-err></div>
+      <div class="note"><b>What a trainer can do:</b> add members (and edit them for 10 minutes), renew memberships, collect payments and see pending dues.<br>
+      <b>What a trainer cannot do:</b> see revenue, reports or phone numbers, send WhatsApp messages, change settings or plans, delete or edit old members.</div>
+      <div class="grid2"><label>Trainer name *<input name="name" required placeholder="e.g. Ravi"></label><label>Trainer email *<input name="email" type="email" required placeholder="trainer@gmail.com"></label></div>
+      <label class="chk"><input type="checkbox" name="health"> Allow this trainer to see members' health details</label>
+      <button class="btn primary" type="submit">${ic('userplus')} Invite trainer</button>
+      <div class="sm mut" style="margin-top:12px">After inviting, ask the trainer to open <b>${esc(location.origin)}</b>, tap <b>“Create your trainer login”</b> and use the same email. They make their own password and verify their email.</div></form>
+    <h2>Your trainers (${list.length})</h2>
+    ${list.map((t) => `<div class="card staff-card"><div class="staff-top"><div class="av">${esc(initials(t.name))}</div><div class="grow"><b>${esc(t.name)}</b><div class="sm mut">${esc(t.email || t.key)}</div></div>${status(t)}</div>
+      <div class="sm mut" style="margin:8px 0">${t.lastSeenAt ? 'Last active ' + when(t.lastSeenAt) : 'Has not logged in yet'} · Health details: <b>${t.canSeeHealth ? 'allowed' : 'hidden'}</b></div>
+      <div class="actions"><button class="btn sm" data-act="staffhealth" data-k="${esc(t.key)}">${t.canSeeHealth ? 'Hide health details' : 'Allow health details'}</button>
+      <button class="btn sm" data-act="staffactive" data-k="${esc(t.key)}">${t.active === false ? 'Switch on' : 'Switch off'}</button>
+      <button class="btn sm danger" data-act="staffremove" data-k="${esc(t.key)}">Remove</button></div></div>`).join('') || empty('No trainers yet. Invite your first trainer above.')}
+  </div><div>
+    <h2 style="margin-top:0">Recent trainer activity</h2>
+    <div class="card sm">${acts.map(({ m, l }) => `<div class="kv"><span><b>${esc(l.by)}</b> · ${esc(l.text)} <span class="mut">(${esc(m.name)})</span></span><span class="mut">${when(l.at)}</span></div>`).join('') || '<span class="mut">Nothing yet. What your trainers add, renew or collect will be listed here.</span>'}</div>
+  </div></div>`);
+}
+formHandlers.invite = async (f) => {
+  const d = Object.fromEntries(new FormData(f)), name = d.name.trim(), email = d.email.trim().toLowerCase();
+  if (!name) return showErr(f, 'Please enter the trainer name.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return showErr(f, 'Please enter a valid email address.');
+  if (email === (S.user.email || '').toLowerCase()) return showErr(f, 'That is your own owner email. Use the trainer\'s own email.');
+  if (S.staffList.some((t) => t.key === email)) return showErr(f, 'This email is already added.');
+  busy(f, true); showErr(f, '');
+  try {
+    await setDoc(sref2(email), { name, email, active: true, canSeeHealth: !!d.health, createdAt: Date.now() });
+    await setDoc(doc(db, 'staffIndex', email), { ownerId: uidOf(), name });
+    f.reset(); toast('Trainer invited. They can now create their login.');
+  } catch (e) { showErr(f, errMsg(e)); }
+  busy(f, false);
+};
+const staffActions = {
+  async staffhealth(a) { const t = S.staffList.find((x) => x.key === a.k); if (!t) return; try { await setDoc(sref2(a.k), { canSeeHealth: !t.canSeeHealth }, { merge: true }); toast(t.canSeeHealth ? 'Health details hidden from ' + t.name : 'Health details allowed for ' + t.name); } catch (e) { toast(errMsg(e), 'err'); } },
+  async staffactive(a) { const t = S.staffList.find((x) => x.key === a.k); if (!t) return; const on = t.active === false; try { await setDoc(sref2(a.k), { active: on }, { merge: true }); toast(on ? t.name + ' can log in again' : t.name + ' is switched off'); } catch (e) { toast(errMsg(e), 'err'); } },
+  async staffremove(a) {
+    const t = S.staffList.find((x) => x.key === a.k); if (!t) return;
+    if (!confirm(`Remove ${t.name} (${t.email || a.k})? They will lose access straight away. Their past work stays on the members.`)) return;
+    try { await deleteDoc(sref2(a.k)); await deleteDoc(doc(db, 'staffIndex', a.k)); toast('Trainer removed'); } catch (e) { toast(errMsg(e), 'err'); }
+  },
+};
+
 async function reauth(f, pw) { await reauthenticateWithCredential(S.user, EmailAuthProvider.credential(S.user.email, pw)); }
 Object.assign(formHandlers, {
   async profile(f) {
@@ -1094,25 +1339,38 @@ const actions = {
     if (S.loggingOut) return; S.loggingOut = true;
     sessionStorage.removeItem('gm_unlocked');
     closeModal(); unsubs.forEach((u) => u()); unsubs = [];
-    S.user = null; S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
+    S.user = null; S.role = 'owner'; S.ownerId = ''; S.staff = null; S.shell = false; S.members = []; S.ready = { s: false, m: false }; S.settings = { ...DEF_SETTINGS };
     $('#lock').innerHTML = ''; authScreen('login');
     signOut(auth).catch(() => {}).finally(() => { S.loggingOut = false; });
   },
+  async verified(a, el) {
+    el.disabled = true;
+    try { await S.user.reload(); await S.user.getIdToken(true); if (S.user.emailVerified) enter(S.user); else toast('Not verified yet. Open the link in your email first.', 'err'); }
+    catch (e) { toast(errMsg(e), 'err'); }
+    el.disabled = false;
+  },
   resendverify() { sendEmailVerification(S.user).then(() => toast('Verification email sent')).catch((e) => toast(errMsg(e), 'err')); },
   closemodal: closeModal,
+  addweight: (a) => openAddWeight(a.id),
+  async delweight(a) {
+    if (!confirm('Delete this weight entry?')) return;
+    const m = structuredClone(getMember(a.id)); if (!m) return;
+    m.weights = (m.weights || []).filter((w) => w.id !== a.w); syncWeight(m);
+    try { await saveMember(m); toast('Entry deleted'); } catch (e) { toast(errMsg(e), 'err'); }
+  },
   mmenu(a) {
     const m = getMember(a.id); if (!m) return; const i = memberInfo(m), other = m.batch === 'Morning' ? 'Evening' : 'Morning';
     openModal('Manage member', `<div class="mm-list">
-      <button class="mm-row" data-act="mact" data-do="go" data-to="#/edit/${m.id}">${ic('edit')}<span>Edit details</span></button>
-      <button class="mm-row" data-act="mact" data-do="movebatch" data-id="${m.id}">${ic('swap')}<span>Move to ${other} batch</span></button>
+      ${canEdit(m) ? `<button class="mm-row" data-act="mact" data-do="go" data-to="#/edit/${m.id}">${ic('edit')}<span>Edit details</span></button>` : ''}
+      ${isTrainer() ? '' : `<button class="mm-row" data-act="mact" data-do="movebatch" data-id="${m.id}">${ic('swap')}<span>Move to ${other} batch</span></button>`}
       ${i.balance ? `<button class="mm-row" data-act="mact" data-do="collect" data-id="${m.id}">${ic('wallet')}<span>Collect ${money(i.balance)}</span></button>` : ''}
-      <button class="mm-row danger" data-act="mact" data-do="delmember" data-id="${m.id}">${ic('trash')}<span>Delete member<small>Also removes payment history</small></span></button></div>`);
+      ${isTrainer() ? '' : `<button class="mm-row danger" data-act="mact" data-do="delmember" data-id="${m.id}">${ic('trash')}<span>Delete member<small>Also removes payment history</small></span></button>`}</div>`);
   },
   mact(a) { closeModal(); actions[a.do]?.(a); },
   ovclick(a, el, e) { if (e.target === el) closeModal(); },
   more() {
-    const tiles = [['batches', 'clock', 'Batches', 'Morning and evening'], ['dues', 'wallet', 'Payments and dues', 'Collect and track'], ['reports', 'chart', 'Reports', 'Revenue and joinings'], ['settings', 'gear', 'Settings', 'Plans, backup, account']];
-    openModal('More', `<div class="more-grid">${tiles.map(([r, i, l, d]) => `<button class="more-tile" data-act="go" data-to="#/${r}"><span class="more-ic">${ic(i)}</span><b>${l}</b><small>${d}</small></button>`).join('')}</div>
+    const tiles = isTrainer() ? [] : [['batches', 'clock', 'Batches', 'Morning and evening'], ['dues', 'wallet', 'Payments and dues', 'Collect and track'], ['reports', 'chart', 'Reports', 'Revenue and joinings'], ['staff', 'userplus', 'Trainers', 'Invite and manage'], ['settings', 'gear', 'Settings', 'Plans, backup, account']];
+    openModal(isTrainer() ? esc(actorName()) + ' · Trainer' : 'More', `${tiles.length ? '' : '<p class="mut" style="margin:0 0 12px">You are logged in as a trainer.</p>'}<div class="more-grid">${tiles.map(([r, i, l, d]) => `<button class="more-tile" data-act="go" data-to="#/${r}"><span class="more-ic">${ic(i)}</span><b>${l}</b><small>${d}</small></button>`).join('')}</div>
       <button class="more-out" data-act="logout">${ic('logout')} Log out</button>`);
   },
   sort(a) { S.sort = { k: a.k, d: S.sort.k === a.k ? -S.sort.d : 1 }; drawMembers(); },
@@ -1129,7 +1387,7 @@ const actions = {
     try { const pages = await renderInvoicePages(d); openModal('Invoice preview', `<div class="inv-prev">${pages.map((c) => `<img src="${c.toDataURL('image/jpeg', 0.85)}" alt="">`).join('')}</div>`, true); } catch (e) { toast(e.message, 'err'); }
   },
   async invwa(a, el) { el.disabled = true; try { await shareInvoiceWhatsApp(invFor(a), waLink, download); } catch (e) { toast(e.message, 'err'); } el.disabled = false; },
-  async movebatch(a) { const m = structuredClone(getMember(a.id)), to = m.batch === 'Morning' ? 'Evening' : 'Morning'; m.logs.push({ at: Date.now(), text: `Batch ${m.batch} → ${to}` }); m.batch = to; await saveMember(m); toast(`Moved to ${to} batch`); },
+  async movebatch(a) { const m = structuredClone(getMember(a.id)), to = m.batch === 'Morning' ? 'Evening' : 'Morning'; m.logs.push(logEntry(`Batch ${m.batch} → ${to}`)); m.batch = to; await saveMember(m); toast(`Moved to ${to} batch`); },
   async delmember(a) { const m = getMember(a.id); if (confirm(`Delete ${m.name} permanently, including payment history? This cannot be undone.`)) { await deleteDoc(mref(a.id)); toast('Member deleted'); location.hash = '#/members'; } },
   tabbatch(a) { S.batchTab = a.b; if (S.route === 'batches') vBatches(); },
   takephoto() { isTouch ? $('#camIn').click() : openWebcam(); },
@@ -1151,6 +1409,7 @@ const actions = {
   walltomorrow() { walList = L().filter((x) => x.i.left === 1); walIdx = 0; walStep(); },
   walnext() { walIdx++; setTimeout(walStep, 250); },
 };
+Object.assign(actions, staffActions);
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = actions[el.dataset.act]; if (!fn) return;

@@ -2,11 +2,78 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Each gym owner can read/write ONLY their own gym's data.
-    match /gyms/{ownerId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == ownerId;
+    // ---------------------------------------------------------------- helpers
+    // The gym OWNER can read/write everything in their own gym.
+    function isOwner(ownerId) {
+      return request.auth != null && request.auth.uid == ownerId;
+      // OPTIONAL extra lock (see README): replace the line above with
+      //   return request.auth != null && request.auth.uid == ownerId && request.auth.uid == 'PASTE_OWNER_UID_HERE';
     }
 
+    // A TRAINER is a signed-in user with a VERIFIED email that the owner added on the Staff page
+    // (document gyms/{ownerId}/staff/{email}) and who has not been switched off.
+    function staffKey() {
+      return request.auth.token.email.lower();
+    }
+    function isStaff(ownerId) {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/gyms/$(ownerId)/staff/$(staffKey()))
+        && get(/databases/$(database)/documents/gyms/$(ownerId)/staff/$(staffKey())).data.active == true;
+    }
+    // list "n" only grew compared to "o": nothing old was removed or changed, and the newest entry is stamped with this trainer
+    function grewByMe(o, n) {
+      return n.size() >= o.size()
+        && n.hasAll(o)
+        && (n.size() == o.size() || n[n.size() - 1].byId == request.auth.uid);
+    }
+
+    // ---------------------------------------------------------------- owner
+    match /gyms/{ownerId}/{document=**} {
+      allow read, write: if isOwner(ownerId);
+    }
+
+    // ---------------------------------------------------------------- trainer
+    // Gym settings: a trainer can read them (plans, gym name...) and may only raise the invoice counter.
+    match /gyms/{ownerId}/settings/{docId} {
+      allow read: if isStaff(ownerId);
+      allow update: if isStaff(ownerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invSeq']);
+      allow create: if isStaff(ownerId) && request.resource.data.keys().hasOnly(['invSeq']);
+    }
+
+    // A trainer can read their own staff record, and update only "lastSeenAt" / "uid" on it.
+    match /gyms/{ownerId}/staff/{key} {
+      allow get: if request.auth != null && request.auth.token.email != null && key == request.auth.token.email.lower();
+      allow update: if isStaff(ownerId) && key == request.auth.token.email.lower()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeenAt', 'uid']);
+    }
+
+    match /gyms/{ownerId}/members/{memberId} {
+      allow read: if isStaff(ownerId);
+
+      // a trainer can add a new member (stamped with their id and the server time); they can never delete members
+      allow create: if isStaff(ownerId)
+        && request.resource.data.addedByUid == request.auth.uid
+        && request.resource.data.createdAtTs == request.time;
+
+      allow update: if isStaff(ownerId) && (
+        // 1) renew / collect a payment on ANY member: only add new entries, never change or remove old ones
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['renewals', 'payments', 'logs'])
+          && grewByMe(resource.data.get('renewals', []), request.resource.data.get('renewals', []))
+          && grewByMe(resource.data.get('payments', []), request.resource.data.get('payments', []))
+          && grewByMe(resource.data.get('logs', []), request.resource.data.get('logs', [])))
+        ||
+        // 2) edit a member they added themselves, but only for 10 minutes after adding
+        (resource.data.get('addedByUid', '') == request.auth.uid
+          && resource.data.get('createdAtTs', null) != null
+          && request.time < resource.data.createdAtTs + duration.value(10, 'm')
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['addedBy', 'addedByUid', 'createdAtTs', 'createdAt']))
+      );
+    }
+
+    // ---------------------------------------------------------------- lookups
     // Lets "login with mobile number" find the email for that number.
     // Single lookups only (no listing). Only the owner can create/change/delete their entry.
     match /phoneIndex/{phone} {
@@ -14,6 +81,15 @@ service cloud.firestore {
       allow list: if false;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
       allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
+    // Tells a trainer which gym they belong to (written by the owner when inviting).
+    match /staffIndex/{key} {
+      allow get: if request.auth != null && request.auth.token.email != null && key == request.auth.token.email.lower();
+      allow list: if false;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
   }
 }

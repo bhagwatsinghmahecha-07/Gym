@@ -15,11 +15,11 @@ Works on phone and laptop, syncs live between them, installs like an app. No bui
 
 ## Step 3 - Security rules (important)
 Firestore Database > **Rules** tab > replace everything with the contents of **`firestore.rules`** > **Publish**.
-This makes every gym's data readable only by its own logged-in owner.
+This makes every gym's data readable only by its own logged-in owner (and by the trainers the owner invites - see "Trainers" below).
 
 ## Step 4 - Upload to GitHub
 1. Create a new repository on github.com (private is fine).
-2. Click **Add file > Upload files** and drag in **everything inside this folder** (index.html, sw.js, manifest.webmanifest, netlify.toml, firebase-config.js, firestore.rules, README.md and the `js`, `css`, `icons`, `vendor` folders). Commit.
+2. Click **Add file > Upload files** and drag in **everything inside this folder** (index.html, sw.js, manifest.webmanifest, netlify.toml, firebase-config.js, firestore.rules, README.md and the `js`, `css`, `icons`, `fonts`, `vendor` folders). Commit.
    Keep the folder structure: `index.html` must be at the top level of the repo.
 
 ## Step 5 - Deploy on Netlify
@@ -31,7 +31,7 @@ This makes every gym's data readable only by its own logged-in owner.
 Authentication > **Settings > Authorized domains > Add domain** > add your Netlify domain (`something.netlify.app`). Without this, login emails/links will fail.
 
 ## Step 7 - Create your account & install the app
-1. Open the live link > **Create account** (owner name, gym name, mobile, email, password). Check your email and verify it.
+1. Create the owner login: Firebase > Authentication > **Users > Add user** (email + password). Then open the live link and log in with it. (A first-time setup form is also available at `your-link/?setup`.)
 2. In **Settings**: set your plans/prices, edit the WhatsApp message, upload your logo.
 3. **Install**
    - Android (Chrome): menu ⋮ > **Add to Home screen / Install app**.
@@ -52,7 +52,6 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 ## Honest limits (and how to upgrade later)
 - **SMS OTP** (to a mobile number) is not included: Firebase phone/SMS verification needs a paid (Blaze) plan and SMS costs. This app uses email links instead. Mobile numbers are not OTP-verified.
 - **Fingerprint unlock**: not built in; use the 4-digit PIN here (or your phone's own app lock).
-- **Staff accounts** (receptionist with limited access) are not included yet; creating extra logins safely needs a small server function. This is the natural next step.
 - WhatsApp opens a pre-filled chat; you tap Send yourself (WhatsApp does not allow silent auto-sending). On phone, "Send on WhatsApp" for invoices shares the PDF directly; on laptop it downloads the PDF and opens the chat so you can attach it.
 - Updating the app: edit files on GitHub; Netlify redeploys. If you do not see a change, close and reopen the app once (cached copy refreshes in the background).
 
@@ -62,3 +61,22 @@ Authentication > **Settings > Authorized domains > Add domain** > add your Netli
 
 ## Brand lettering
 The gym name is shown in logo-style lettering (first word light blue, the rest yellow) using the bundled Exo 2 font (SIL Open Font License) in /fonts.
+
+## Trainers (limited logins)
+The owner can invite trainers. Each trainer gets their own login on their own phone.
+**What a trainer can do:** add members; edit a member only for 10 minutes after adding that member; renew memberships; collect payments; see the member list and pending dues (names and amounts owed).
+**What a trainer cannot do:** see phone numbers, revenue, reports, billed/paid totals; send WhatsApp messages or call from the app; change settings, plans or backups; edit, delete or export old members. Health details are hidden unless the owner switches them on for that trainer.
+Every member shows **Added by**, every renewal shows **Renewed by** and every payment shows **Collected by**. **Trainers > Recent trainer activity** lists what each trainer did.
+
+### One-time setup (owner)
+1. Firebase > Authentication > Sign-in method: keep **Email/Password** ON (trainers create their own login with it). Do not turn sign-ups off.
+2. Publish the new **`firestore.rules`** (Firestore > Rules > paste > Publish). The rules are what really stop a trainer from doing things the screens hide.
+3. **Recommended lock:** Authentication > Users > copy your own **User UID**. In `firestore.rules`, find `isOwner` and use the commented line, pasting your UID. This stops anyone else who creates an account from getting their own gym space in your database.
+4. Log in as the owner > **Trainers** > enter the trainer's name and email > **Invite trainer**.
+5. Ask the trainer to open your live link, tap **Create your trainer login**, use the same email and make a password, then tap the verification link in their email and press **I have verified my email**.
+6. To stop a trainer: **Trainers > Switch off** (or **Remove**). They lose access immediately.
+
+### Good to know
+- Hiding phone numbers and money is done in the app screens. The data of a member is stored in one record, so a technically skilled trainer using browser developer tools could still read it. The rules do block trainers from writing anything they are not allowed to.
+- The 10-minute edit time is measured by Firebase's clock, so changing a phone's clock does not extend it.
+- A trainer can add new entries (a renewal or a payment) to any member but cannot change or remove old ones.

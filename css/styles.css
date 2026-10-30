@@ -264,3 +264,28 @@ tbody tr.clickable:hover,a.kv:hover{background:#e8f3fd}
 @supports not (background-clip:text){.bname .bn-a{color:#2fd0f6}.bname .bn-b{color:#f8c910}}
 .side .brand{padding:10px 0 16px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:12px}
 .side-logo{width:114%;max-width:none;margin:0 -7%}
+
+/* ---- health & fitness ---- */
+.hf-box{background:#f4f9fe;border:1px solid var(--line);border-radius:14px;padding:14px;margin:6px 0 14px}
+.hf-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.hf-tile{background:#f1f6fc;border-radius:12px;padding:12px 8px;text-align:center;min-width:0}
+.hf-tile small{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.hf-tile b{display:block;font-size:clamp(16px,4.4vw,21px);margin:3px 0}
+.hf-line{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.goal-tag{background:#e6f2fd;color:#055aa3;border-radius:20px;padding:5px 14px;font-size:13px;font-weight:700}
+.hf-note{background:#fff4e0;border-left:4px solid #fab706;border-radius:10px;padding:10px 12px;margin-top:10px;display:flex;flex-direction:column;gap:3px;font-size:14px;overflow-wrap:anywhere}
+.hf-note b{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#9a6a00}
+.spark{display:block;width:100%;height:70px;margin:2px 0 4px}
+.wt-table td,.wt-table th{padding:9px 6px}.wt-good{color:#16a34a}.wt-bad{color:#dc2626}
+.wt-table .btn.sm{padding:5px 8px;min-width:0}
+
+/* ---- trainer role + staff page ---- */
+.mp-tiles.one{grid-template-columns:1fr}
+.mp-by{font-size:12.5px;color:var(--mut);margin-top:3px}.mp-by b{color:var(--tx)}
+.edit-banner{background:linear-gradient(135deg,#fff8dc,#ffefb0);border:1px solid #f3d36b;border-left:5px solid #fab706;color:#5b4300;padding:11px 14px;border-radius:12px;margin:10px 0;font-size:14px}
+.whoami{margin:8px 0 8px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.08);color:#fff;display:flex;flex-direction:column;gap:2px}
+.whoami b{font-size:14px}.whoami span{font-size:11px;color:#ffd24a;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+.hero-n .who{font-size:22px}
+.tr-link{border-top:1px solid var(--line);padding-top:12px;justify-content:center;align-items:center;gap:6px}
+.staff-card{margin-bottom:12px}.staff-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.staff-top .grow{flex:1;min-width:140px;word-break:break-all}
+.staff-top .av{width:42px;height:42px;font-size:15px;flex:none}
