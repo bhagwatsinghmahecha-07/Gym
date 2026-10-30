@@ -135,7 +135,7 @@ const errMsg = (e) =>
     'auth/weak-password': 'Password must be at least 8 characters.', 'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
     'auth/network-request-failed': 'No internet connection.', 'auth/invalid-email': 'Please enter a valid email.',
     'auth/requires-recent-login': 'Please log in again and retry.', 'permission-denied': 'Database permission denied. Publish firestore.rules (README step 4).',
-    'bad-phone': 'Enter a valid 10-digit mobile number.',
+    'bad-phone': 'Enter a valid 10-digit mobile number.', 'auth/user-disabled': 'This login has been disabled. Please contact the gym owner.',
   }[e.code] || e.message || 'Something went wrong.');
 const showErr = (f, msg) => { const el = $('[data-err]', f); if (el) { el.textContent = msg; el.classList.toggle('hide', !msg); } const ok = $('[data-ok]', f); if (ok) ok.classList.add('hide'); };
 const showOk = (f, msg) => { const el = $('[data-ok]', f); if (el) { el.textContent = msg; el.classList.remove('hide'); } const er = $('[data-err]', f); if (er) er.classList.add('hide'); };
@@ -198,6 +198,7 @@ const formHandlers = {
     if (d.pw.length < 8) return showErr(f, 'Password must be at least 8 characters.');
     if (d.pw !== d.pw2) return showErr(f, 'Passwords do not match.');
     busy(f, true); showErr(f, '');
+    S.signingUp = true;
     try {
       if ((await getDoc(doc(db, 'phoneIndex', phone))).exists()) throw { message: 'This mobile number is already registered.' };
       const cred = await createUserWithEmailAndPassword(auth, d.email.trim(), d.pw);
@@ -206,7 +207,8 @@ const formHandlers = {
       await setDoc(doc(db, 'phoneIndex', phone), { uid: u, email: d.email.trim() });
       sendEmailVerification(cred.user).catch(() => {});
       localStorage.setItem('gm_remember', '1');
-    } catch (e) { showErr(f, errMsg(e)); }
+      S.signingUp = false; S.user = cred.user; enter(cred.user);
+    } catch (e) { S.signingUp = false; showErr(f, errMsg(e)); }
     busy(f, false);
   },
   async forgot(f) {
@@ -216,7 +218,8 @@ const formHandlers = {
     busy(f, true);
     try {
       const email = await emailFor(d.id);
-      await sendPasswordResetEmail(auth, email);
+      try { await sendPasswordResetEmail(auth, email, { url: location.origin + '/?reset=1', handleCodeInApp: false }); }
+      catch (e2) { if (['auth/unauthorized-continue-uri', 'auth/invalid-continue-uri', 'auth/missing-continue-uri'].includes(e2.code)) await sendPasswordResetEmail(auth, email); else throw e2; }
     } catch (e) { if (e.code === 'bad-phone' || e.code === 'auth/network-request-failed' || e.code === 'auth/too-many-requests') { busy(f, false); return showErr(f, errMsg(e)); } }
     showOk(f, 'If this account exists, a password reset link has been sent to its registered email. Open it, set a new password (min 8 characters), then log in.');
     busy(f, false);
@@ -228,16 +231,26 @@ const formHandlers = {
     busy(f, true); showErr(f, '');
     S.signingUp = true;
     const done = () => { busy(f, false); setTimeout(() => { S.signingUp = false; }, 900); };
+    const invitedOf = async () => { try { return (await getDoc(doc(db, 'staffIndex', email.toLowerCase()))).exists(); } catch { return false; } };
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, d.pw);
-      let invited = false;
-      try { invited = (await getDoc(doc(db, 'staffIndex', email.toLowerCase()))).exists(); } catch { invited = false; }
-      if (!invited) {
-        await cred.user.delete().catch(() => signOut(auth));
-        done();
-        return showErr(f, 'This email has not been invited yet. Please ask the gym owner to add your email on the Staff page, then try again.');
+      let cred, existing = false;
+      try { cred = await createUserWithEmailAndPassword(auth, email, d.pw); }
+      catch (e) {
+        if (e.code !== 'auth/email-already-in-use') throw e;
+        // this email already has a login (an old trainer who was removed and added again): no sign-up needed, just log in
+        existing = true;
+        try { cred = await signInWithEmailAndPassword(auth, email, d.pw); }
+        catch (e2) {
+          if (['auth/invalid-credential', 'auth/wrong-password'].includes(e2.code)) { done(); return showErr(f, 'This email already has a login, so you do not need to sign up again. Go back and log in with your old password, or use "Forgot Password?" to set a new one.'); }
+          throw e2;
+        }
       }
-      sendEmailVerification(cred.user).catch(() => {});
+      if (!(await invitedOf())) {
+        if (existing) await signOut(auth).catch(() => {}); else await cred.user.delete().catch(() => signOut(auth));
+        done();
+        return showErr(f, 'This email has not been added as a trainer yet. Please ask the gym owner to add it on the Trainers page, then try again.');
+      }
+      if (!existing) sendEmailVerification(cred.user).catch(() => {});
       localStorage.setItem('gm_remember', '1');
       done();
       S.user = cred.user; enter(cred.user);
@@ -292,6 +305,10 @@ formHandlers.unlock = async (f) => {
 };
 
 // ------------------------------------------------------------------ auth state + data listeners
+if (new URLSearchParams(location.search).has('reset')) {
+  S.authMsg = '<div class="ok">Your password was changed. Please log in with your new password.</div>';
+  history.replaceState(null, '', '/');
+}
 if (isSignInWithEmailLink(auth, location.href)) {
   (async () => {
     let email = localStorage.getItem('gm_link_email') || prompt('Confirm your email to finish login:');
@@ -308,9 +325,19 @@ function noticeScreen(title, html) {
 const verifyScreen = () => noticeScreen('Verify your email', `<p>We sent a verification link to <b>${esc(S.user.email)}</b>. Open it, then come back here and tap the button.</p>
   <button class="btn primary block" data-act="verified">I have verified my email</button>
   <div class="links"><button class="linkbtn" data-act="resendverify">Resend email</button><button class="linkbtn" data-act="logout">Log out</button></div>`);
-function noAccessScreen() {
+// Signs the person out and shows the login screen with a short, clear message (so reopening the app never gets stuck)
+const NO_ACCESS = {
+  removed: 'Your trainer access was removed by the gym owner. Please ask the owner to add you again.',
+  off: 'Your trainer access is switched off by the gym owner. Please contact the owner.',
+  none: 'This email is not added as a trainer, and no gym account was found for it. Please ask the gym owner to add your email on the Trainers page.',
+};
+function noAccessScreen(kind = 'removed') {
   unsubs.forEach((u) => u()); unsubs = []; S.ready = { s: false, m: false };
-  noticeScreen('No access', `<p>Your trainer access is switched off or was removed. Please contact the gym owner.</p><div class="links"><button class="linkbtn" data-act="logout">← Log out</button></div>`);
+  S.authMsg = `<div class="err" role="alert">${NO_ACCESS[kind] || NO_ACCESS.removed}</div>`;
+  $('#lock').innerHTML = '';
+  S.user = null; S.role = 'owner'; S.ownerId = ''; S.staff = null; S.shell = false; S.members = [];
+  authScreen('login', S.authMsg); S.authMsg = '';
+  signOut(auth).catch(() => {});
 }
 
 function startSession(user) {
@@ -323,7 +350,7 @@ function startSession(user) {
         setTimeout(() => { if (S.user && S.user.uid === user.uid) listen(q, next, tries + 1); }, 700 * (tries + 1));
         return;
       }
-      if (isTrainer() && e.code === 'permission-denied') return noAccessScreen();
+      if (isTrainer() && e.code === 'permission-denied') return noAccessScreen('removed');
       toast(errMsg(e), 'err');
     }));
   };
@@ -347,24 +374,41 @@ async function enter(user) {
   S.role = 'owner'; S.ownerId = ''; S.staff = null;
   root.innerHTML = '<div class="splash"><img src="/icons/logo-emblem.png" alt=""><div>Loading your gym…</div></div>';
   const key = (user.email || '').toLowerCase(), ck = 'gm_role_' + user.uid;
+  const wasCache = localStorage.getItem(ck);
   let idx = null, known = false;
   try { const sn = await getDoc(doc(db, 'staffIndex', key)); known = true; if (sn.exists()) idx = sn.data(); } catch { /* offline: use what this device remembered */ }
   if (S.user !== user) return;
-  if (known) localStorage.setItem(ck, idx ? JSON.stringify({ o: idx.ownerId }) : 'owner');
-  else { const c = localStorage.getItem(ck); if (c && c !== 'owner') { try { idx = { ownerId: JSON.parse(c).o }; } catch { /* ignore */ } } }
+  if (known && idx) localStorage.setItem(ck, JSON.stringify({ o: idx.ownerId }));
+  else if (!known) { const c = wasCache; if (c && c !== 'owner') { try { idx = { ownerId: JSON.parse(c).o }; } catch { /* ignore */ } } }
   if (idx) {
     S.role = 'trainer'; S.ownerId = idx.ownerId;
     if (!user.emailVerified) return verifyScreen();
     try {
       const sd = await getDoc(doc(db, 'gyms', idx.ownerId, 'staff', key));
       if (S.user !== user) return;
-      if (!sd.exists() || sd.data().active === false) return noAccessScreen();
+      if (!sd.exists()) return noAccessScreen('removed');
+      if (sd.data().active === false) return noAccessScreen('off');
       S.staff = sd.data();
     } catch (e) {
-      if (e.code === 'permission-denied') return noAccessScreen();
+      if (e.code === 'permission-denied') return noAccessScreen('removed');
       S.staff = { name: 'Trainer' }; // offline: carry on with what is cached
     }
+  } else if (known) {
+    // Not a trainer. Make sure this really is a gym owner (owner has a settings record); otherwise it is a removed or never-added trainer.
+    const wasTrainer = (() => { try { return !!JSON.parse(wasCache || 'null')?.o; } catch { return false; } })();
+    let owner = null;
+    for (let i = 0; i < 2 && owner === null; i++) {
+      try { owner = (await getDoc(doc(db, 'gyms', user.uid, 'settings', 'main'))).exists(); }
+      catch (e) {
+        if (e.code === 'permission-denied') { owner = false; if (i === 0) { owner = null; try { await user.getIdToken(true); } catch { /* ignore */ } } }
+        else break; // offline / unknown: let the owner in
+      }
+    }
+    if (S.user !== user) return;
+    if (owner === null && wasCache === 'owner') owner = true;
+    if (owner === false || (owner === null && wasTrainer)) { localStorage.removeItem(ck); return noAccessScreen(wasTrainer ? 'removed' : 'none'); }
   }
+  if (!idx) localStorage.setItem(ck, 'owner');
   startSession(user);
 }
 
@@ -374,7 +418,7 @@ onAuthStateChanged(auth, (user) => {
   S.role = 'owner'; S.ownerId = ''; S.staff = null; S.staffList = [];
   S.user = user;
   if (S.signingUp) return; // trainer sign-up is checking the invitation first
-  if (!user) { $('#lock').innerHTML = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login'); }
+  if (!user) { $('#lock').innerHTML = ''; const m = S.authMsg || ''; S.authMsg = ''; return authScreen(new URLSearchParams(location.search).has('setup') ? 'signup' : 'login', m); }
   if (inactiveTooLong()) { signOut(auth); return; }
   touchActivity();
   enter(user);

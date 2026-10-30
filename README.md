@@ -80,3 +80,10 @@ Every member shows **Added by**, every renewal shows **Renewed by** and every pa
 - Hiding phone numbers and money is done in the app screens. The data of a member is stored in one record, so a technically skilled trainer using browser developer tools could still read it. The rules do block trainers from writing anything they are not allowed to.
 - The 10-minute edit time is measured by Firebase's clock, so changing a phone's clock does not extend it.
 - A trainer can add new entries (a renewal or a payment) to any member but cannot change or remove old ones.
+
+
+## Trainer login notes (v11)
+- A removed trainer who tries to log in sees a short message on the login screen ("access was removed…"), and a person who was never added sees "not added as a trainer". They are signed out automatically, so reopening the app shows the login screen.
+- If you add a removed trainer again, they do NOT sign up again. They log in with their old password (or tap *Forgot Password?*).
+- Forgot password: the reset email's "Continue" button brings the person back to this app. For this, your Netlify domain must be listed in Firebase > Authentication > Settings > Authorized domains.
+- `firestore.rules` already contains the owner lock for UID `y0neSASkGGUFMvBJTcoG8Jd3GpC2`. Check it matches the owner login in Firebase > Authentication > Users.
