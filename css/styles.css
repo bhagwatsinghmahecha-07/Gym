@@ -290,3 +290,12 @@ tbody tr.clickable:hover,a.kv:hover{background:#e8f3fd}
 .tr-link{border-top:1px solid var(--line);padding-top:12px;justify-content:center;align-items:center;gap:6px}
 .staff-card{margin-bottom:12px}.staff-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.staff-top .grow{flex:1;min-width:140px;word-break:break-all}
 .staff-top .av{width:42px;height:42px;font-size:15px;flex:none}
+
+/* reward points (owner only) */
+.rp-card{background:linear-gradient(160deg,#00102e,#04245a 60%,#0a4a99);color:#fff;border-radius:18px;padding:16px;margin:0 0 12px;border:1px solid rgba(250,183,6,.35);box-shadow:var(--sh)}
+.rp-top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.05em}.rp-top i{font-style:normal;background:#fab706;color:#00102e;border-radius:99px;padding:3px 10px;letter-spacing:0}
+.rp-big{font-size:46px;font-weight:900;color:#fab706;line-height:1.05;margin:6px 0 2px}.rp-sub{opacity:.85;font-size:14px}
+.rp-tiles{display:flex;gap:8px;margin-top:12px}.rp-tiles>div{flex:1;background:rgba(255,255,255,.1);border-radius:12px;padding:8px 10px}.rp-tiles small{display:block;opacity:.75;font-size:12px}.rp-tiles b{font-size:18px}
+.rp-hist{max-height:340px;overflow:auto}.rp-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line,#e6ecf5)}.rp-row:first-child{border-top:0}
+.rp-row b{display:block;font-size:14px}.rp-row span{display:block;font-size:12px;color:var(--mut)}.rp-p{color:var(--green);font-weight:800;font-size:16px}.rp-m{color:var(--red);font-weight:800;font-size:16px}
+.rp-use{background:#fff8e1;border:1px solid #f3d98a;border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px}.rp-use label{margin:8px 0 0}

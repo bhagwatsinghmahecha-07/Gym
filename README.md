@@ -87,3 +87,10 @@ Every member shows **Added by**, every renewal shows **Renewed by** and every pa
 - If you add a removed trainer again, they do NOT sign up again. They log in with their old password (or tap *Forgot Password?*).
 - Forgot password: the reset email's "Continue" button brings the person back to this app. For this, your Netlify domain must be listed in Firebase > Authentication > Settings > Authorized domains.
 - `firestore.rules` already contains the owner lock for UID `y0neSASkGGUFMvBJTcoG8Jd3GpC2`. Check it matches the owner login in Firebase > Authentication > Users.
+
+## Reward points (v13, owner only)
+- Open a member's profile > **Give points**, type the reason and the number of points. Nothing is calculated from rupees; you decide each time.
+- The profile shows the balance, the rupee value (1 point = ₹2 by default; change it in Settings > Reward points), total earned/used and a full history.
+- When you renew a member, the renewal screen shows their points. Enter how many to use and the fee drops by the point value. The invoice shows a "Reward points discount" line.
+- Mistakes are fixed with **Take away (correction)**; history entries are never edited or deleted. Trainers cannot see or use points.
+- No change to `firestore.rules` is needed.

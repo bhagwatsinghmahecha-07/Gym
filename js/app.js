@@ -44,7 +44,7 @@ const DEFAULT_EXPIRED_TEMPLATE =
   'Hello {name}, your {plan} gym membership expired on {date}. We miss you at the gym! Renew now to get back to your workouts. - {gym}';
 const DEFAULT_WELCOME_TEMPLATE =
   'Welcome to {gym}, {name}! Your {plan} membership is active from {start} to {date}. We are glad to have you with us. See you at the gym! - {gym}';
-const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', terms: '', rules: '', invSeq: 0 };
+const DEF_SETTINGS = { gymName: 'My Gym', ownerName: '', phone: '', email: '', plans: DEFAULT_PLANS, template: DEFAULT_TEMPLATE, expiredTemplate: DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: DEFAULT_WELCOME_TEMPLATE, logo: '', terms: '', rules: '', invSeq: 0, pointValue: 2 };
 
 const S = {
   user: null, role: 'owner', ownerId: '', staff: null, staffList: [], settings: { ...DEF_SETTINGS }, members: [], ready: { s: false, m: false }, shell: false,
@@ -696,6 +696,48 @@ function healthCards(m, mayEdit = true) {
 }
 
 // ------------------------------------------------------------------ MEMBER profile
+// ---- reward points (owner only). m.points = [{id, at, date, pts (+ given / - used), reason, kind: give|use|fix, by, byId}]
+const pointVal = () => (+S.settings.pointValue > 0 ? +S.settings.pointValue : 2);
+const ptsList = (m) => m.points || [];
+const ptsBal = (m) => ptsList(m).reduce((a, x) => a + (+x.pts || 0), 0);
+function pointsHtml(m) {
+  const list = [...ptsList(m)].sort((a, b) => (b.at || 0) - (a.at || 0)), bal = ptsBal(m), v = pointVal();
+  const earned = list.filter((x) => x.pts > 0).reduce((a, x) => a + x.pts, 0), usedP = list.filter((x) => x.pts < 0).reduce((a, x) => a - x.pts, 0);
+  return `<div class="rp-card"><div class="rp-top"><span>⭐ REWARD POINTS</span><i>1 point = ${money(v)} off</i></div>
+    <div class="rp-big">${bal}</div><div class="rp-sub">${bal ? `= ${money(bal * v)} off on the next membership` : 'No points yet'}</div>
+    <div class="rp-tiles"><div><small>Earned</small><b>${earned}</b></div><div><small>Used</small><b>${usedP}</b></div><div><small>Entries</small><b>${list.length}</b></div></div></div>
+  <div class="mp-btns" style="margin-bottom:12px"><button class="mp-btn pri" data-act="givepts" data-id="${m.id}">${ic('plus')}Give points</button></div>
+  <h2 style="margin-top:0">Points history</h2><div class="card rp-hist">${list.map((x) => `<div class="rp-row"><div><b>${esc(x.reason || '-')}</b><span>${fmtDate(x.date)} · ${x.by ? esc(x.by) : 'Owner'}${x.kind === 'fix' ? ' · correction' : ''}</span></div><div class="${x.pts < 0 ? 'rp-m' : 'rp-p'}">${x.pts > 0 ? '+' : '−'}${Math.abs(x.pts)}</div></div>`).join('') || '<span class="mut">No points given yet. Tap “Give points” when this member buys something or a membership.</span>'}</div>`;
+}
+function openGivePts(id) {
+  const m = getMember(id); if (!m || isTrainer()) return;
+  openModal('Give points · ' + esc(m.name), `<form data-form="givepts" data-id="${id}"><div class="err hide" data-err></div>
+    <div class="preview"><div class="kv"><span>Current points</span><b>${ptsBal(m)} (${money(ptsBal(m) * pointVal())} off)</b></div></div>
+    <label>Reason *<input name="reason" required maxlength="80" placeholder="e.g. Bought protein bar / Bought 3 Month membership" autofocus></label>
+    <div class="grid2"><label>Points *<input name="pts" type="number" min="1" step="1" required inputmode="numeric"></label>
+    <label>Type<select name="type"><option value="give">Give points</option><option value="fix">Take away (correction)</option></select></label></div>
+    <button class="btn primary block" type="submit">Save points</button></form>`);
+}
+formHandlers.givepts = async (f) => {
+  if (isTrainer()) return;
+  const d = Object.fromEntries(new FormData(f)), m = structuredClone(getMember(f.dataset.id)), n = Math.floor(+d.pts);
+  if (!d.reason.trim()) return showErr(f, 'Please write the reason.');
+  if (!(n >= 1)) return showErr(f, 'Enter points as a whole number, 1 or more.');
+  const fix = d.type === 'fix';
+  if (fix && n > ptsBal(m)) return showErr(f, `This member only has ${ptsBal(m)} points.`);
+  busy(f, true);
+  try {
+    m.points = [...ptsList(m), { id: uid(), at: Date.now(), date: todayStr(), pts: fix ? -n : n, reason: d.reason.trim(), kind: fix ? 'fix' : 'give', ...byTag() }];
+    await saveMember(m); closeModal(); toast(fix ? n + ' points taken away' : n + ' points given');
+  } catch (e) { showErr(f, errMsg(e)); }
+  busy(f, false);
+};
+formHandlers.rewards = async (f) => {
+  const v = +new FormData(f).get('pointValue');
+  if (!(v > 0)) return showErr(f, 'Enter an amount greater than 0.');
+  try { await saveSettings({ pointValue: v }); toast('Saved. 1 point = ' + money(v)); } catch (e) { showErr(f, errMsg(e)); }
+};
+
 function vMember(id) {
   const m = getMember(id);
   if (!m) { location.hash = '#/members'; return; }
@@ -718,6 +760,7 @@ function vMember(id) {
     ${i.balance ? `<button class="mp-collect" data-act="collect" data-id="${m.id}">${ic('wallet')}Collect pending ${money(i.balance)}</button>` : ''}</div>
   <div class="mp-tiles ${tr ? 'one' : ''}">${tr ? '' : `<div class="mp-tile"><span>Total billed</span><b>${money(i.net)}</b></div><div class="mp-tile"><span>Total paid</span><b>${money(i.paid)}</b></div>`}
     <div class="mp-tile"><span>Pending</span><b style="color:${i.balance ? 'var(--red)' : 'var(--green)'}">${money(i.balance)}</b></div></div>
+  ${tr ? '' : pointsHtml(m)}
   <div class="dash"><div><h2>Subscription</h2><div class="card">
     <div class="mp-prog-h"><b>${esc(i.c.planName)}</b><span class="mut sm">${daysText(i.left)}</span></div>
     <div class="mp-bar"><i style="width:${used}%"></i></div>
@@ -913,7 +956,7 @@ async function nextInvoiceNo() {
 async function addPayment(m, amount, mode, date, balanceAfter, note = '') {
   const c = curRenewal(m);
   m.payments.push({ id: uid(), date, amount, mode, note, ...byTag(), invoiceNo: await nextInvoiceNo(), renewalId: c.id,
-    snap: { planName: c.planName, start: c.start, due: c.due, price: c.price, discount: c.discount || 0, balance: balanceAfter } });
+    snap: { planName: c.planName, start: c.start, due: c.due, price: c.price, discount: c.discount || 0, pointsUsed: c.pointsUsed || 0, pointsValue: c.pointsValue || 0, balance: balanceAfter } });
 }
 
 // ------------------------------------------------------------------ RENEW modal
@@ -936,29 +979,45 @@ function openRenew(id) {
     <label>Plan<select name="plan">${planOptions(p0?.id)}</select></label>
     <div class="grid2"><label>Renewal date<input type="date" name="date" value="${todayStr()}" required></label>
     <label>Discount (₹)<input type="number" name="discount" min="0" step="any" value="0"></label></div>
+    ${!isTrainer() && ptsBal(m) > 0 ? `<div class="rp-use"><div>⭐ ${m.name ? esc(m.name) : 'Member'} has <b>${ptsBal(m)} points</b> = ${money(ptsBal(m) * pointVal())} off</div>
+      <label>Points to use <span class="mut sm" id="ptmax"></span><input type="number" name="pts" min="0" step="1" value="0"></label></div>` : ''}
     <div class="grid2"><label>Amount paid (₹)<input type="number" name="paid" min="0" step="any"></label>
     <label>Payment mode<select name="mode"><option>Cash</option><option>UPI</option><option>Card</option></select></label></div>
     <div id="rprev"></div><button class="btn primary block" type="submit">✅ Confirm & save renewal</button></form>`);
   const f = $('#modal form');
   const upd = (reset) => {
     const d = Object.fromEntries(new FormData(f)), p = planOf(d.plan); if (!p) return;
-    const disc = Math.max(0, +d.discount || 0);
+    let disc = Math.max(0, +d.discount || 0), ptxt = '';
+    if (f.pts) {
+      const mx = Math.max(0, Math.min(ptsBal(m), Math.floor(Math.max(0, p.price - disc) / pointVal())));
+      let n = Math.max(0, Math.floor(+f.pts.value || 0));
+      if (n > mx) { n = mx; f.pts.value = mx; }
+      f.pts.max = mx; $('#ptmax').textContent = '(max ' + mx + ')';
+      if (n) { disc += n * pointVal(); ptxt = `<div class="preview"><div class="kv"><span>Points discount (${n} points)</span><b style="color:var(--green)">− ${money(n * pointVal())}</b></div></div>`; }
+    }
     if (reset) f.paid.value = Math.max(0, p.price - disc);
-    $('#rprev').innerHTML = periodPreview(prev.due, d.date, p.days, p.price, disc, +f.paid.value || 0);
+    $('#rprev').innerHTML = ptxt + periodPreview(prev.due, d.date, p.days, p.price, disc, +f.paid.value || 0);
   };
-  f.addEventListener('input', (e) => upd(e.target.name === 'plan' || e.target.name === 'discount'));
+  f.addEventListener('input', (e) => upd(['plan', 'discount', 'pts'].includes(e.target.name)));
   upd(true);
 }
 formHandlers.renew = async (f) => {
   const d = Object.fromEntries(new FormData(f)), m = structuredClone(getMember(f.dataset.id)), p = planOf(d.plan);
   const prev = curRenewal(m);
-  const disc = Math.max(0, +d.discount || 0), paid = Math.max(0, +d.paid || 0), net = Math.max(0, p.price - disc);
+  let disc = Math.max(0, +d.discount || 0);
+  const paid = Math.max(0, +d.paid || 0);
+  let pts = isTrainer() ? 0 : Math.max(0, Math.floor(+d.pts || 0));
+  if (pts > ptsBal(m)) return showErr(f, `This member only has ${ptsBal(m)} points.`);
+  if (pts && pts * pointVal() > Math.max(0, p.price - disc)) return showErr(f, 'Points discount is more than the fee. Use fewer points.');
+  const pv = pts * pointVal(); disc += pv;
+  const net = Math.max(0, p.price - disc);
   if (paid > net) return showErr(f, 'Amount paid cannot be more than the amount to pay.');
   const per = calcPeriod(prev.due, d.date, p.days);
   if (per.due < per.start) return showErr(f, 'Due date cannot be earlier than the start date.');
   busy(f, true);
   try {
-    m.renewals.push({ id: uid(), date: d.date, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, start: per.start, due: per.due, ...byTag() });
+    m.renewals.push({ id: uid(), date: d.date, planId: p.id, planName: p.name, days: p.days, price: p.price, discount: disc, ...(pts ? { pointsUsed: pts, pointsValue: pv } : {}), start: per.start, due: per.due, ...byTag() });
+    if (pts) m.points = [...ptsList(m), { id: uid(), at: Date.now(), date: d.date, pts: -pts, reason: `Used on ${p.name} renewal (${money(pv)} off)`, kind: 'use', ...byTag() }];
     m.logs.push(logEntry(`Renewed ${p.name}: ${fmtDate(per.start)} → ${fmtDate(per.due)}`));
     if (paid > 0) await addPayment(m, paid, d.mode, d.date, Math.max(0, memberInfo(m).balance - paid));
     await saveMember(m);
@@ -1203,7 +1262,7 @@ async function restoreData(obj) {
     await b.commit();
   }
   const s = obj.settings || {};
-  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: s.welcomeTemplate ?? S.settings.welcomeTemplate ?? DEFAULT_WELCOME_TEMPLATE, logo: s.logo ?? '', terms: s.terms ?? S.settings.terms ?? '', rules: s.rules ?? S.settings.rules ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0) });
+  await saveSettings({ gymName: s.gymName ?? S.settings.gymName, plans: s.plans ?? S.settings.plans, template: s.template ?? S.settings.template, expiredTemplate: s.expiredTemplate ?? S.settings.expiredTemplate ?? DEFAULT_EXPIRED_TEMPLATE, welcomeTemplate: s.welcomeTemplate ?? S.settings.welcomeTemplate ?? DEFAULT_WELCOME_TEMPLATE, logo: s.logo ?? '', terms: s.terms ?? S.settings.terms ?? '', rules: s.rules ?? S.settings.rules ?? '', invSeq: Math.max(s.invSeq || 0, S.settings.invSeq || 0), pointValue: s.pointValue ?? S.settings.pointValue ?? 2 });
 }
 async function latestCloudBackup() {
   const ids = (await getDocs(collection(db, 'gyms', uidOf(), 'backups'))).docs.map((d) => d.id).sort();
@@ -1226,6 +1285,9 @@ function vSettings() {
     <h2>Plans & pricing</h2><form class="card" data-form="plans"><div class="note">Price/duration changes apply only to new joinings and renewals. Past payments never change.</div><div class="err hide" data-err></div>
       <div id="planrows">${s.plans.map(planRow).join('')}</div>
       <div class="actions"><button type="button" class="btn" data-act="addplanrow">＋ Add plan</button><button class="btn primary" type="submit">Save plans</button></div></form>
+    <h2>Reward points</h2><form class="card" data-form="rewards"><div class="err hide" data-err></div><div class="note">You give points by hand on each member's profile. Here you only set what one point is worth when a member uses points on a membership.</div>
+      <label>1 point = ₹ (off the membership fee)<input name="pointValue" type="number" min="0.01" step="any" value="${+s.pointValue > 0 ? +s.pointValue : 2}" required></label>
+      <button class="btn primary" type="submit">Save</button></form>
     <h2>Invoice terms & gym rules</h2><form class="card" data-form="terms"><div class="note">These print on an extra page after every invoice (PDF, print and WhatsApp). Write one point per line. Leave a box empty to leave it out.</div>
       <label>Terms & Conditions<textarea name="terms" style="min-height:170px">${esc(s.terms || '')}</textarea></label>
       <label>Gym Rules<textarea name="rules" style="min-height:170px">${esc(s.rules || '')}</textarea></label>
@@ -1454,6 +1516,7 @@ const actions = {
   walnext() { walIdx++; setTimeout(walStep, 250); },
 };
 Object.assign(actions, staffActions);
+Object.assign(actions, { givepts: (a) => openGivePts(a.id) });
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = actions[el.dataset.act]; if (!fn) return;
